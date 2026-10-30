@@ -12,3 +12,17 @@ venv/
 dist/
 build/
 *.log
+
+# Frontend
+.next/
+.next-e2e/
+.next-mocks/
+next-env.d.ts
+playwright-report/
+test-results/
+
+# Backend
+.pytest_cache/
+.ruff_cache/
+backend/scripts/out/
+*.tsbuildinfo

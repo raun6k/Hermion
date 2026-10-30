@@ -1,0 +1,9 @@
+[
+  {
+    "goal_id": "G001",
+    "merchant_id": "M001",
+    "goal_type": "clear_stock",
+    "product_ids": ["KURTA-MRN-M", "KURTA-MRN-L"],
+    "instructions": "These kurtas have been in the shop for a while. Mention them when a customer is looking at shirts."
+  }
+]

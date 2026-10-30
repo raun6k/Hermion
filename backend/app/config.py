@@ -1,0 +1,93 @@
+"""Settings loaded from the environment (and the repo-root `.env`). Fails fast on missing required values."""
+
+import re
+from functools import lru_cache
+from pathlib import Path
+from typing import Annotated
+
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+_LANGUAGE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")  # BCP-47 as Sarvam uses it: hi-IN, te-IN, en-IN
+_PERSONA = re.compile(r"^[a-z0-9]+(_[a-z0-9]+){2,}$")  # v4 voice_language_style, e.g. aparna_hi_customer
+
+
+def parse_speaker_map(raw: str) -> dict[str, str]:
+    """Parse `SARVAM_TTS_SPEAKERS` ("hi-IN=aparna_hi_customer, te-IN=...") into {language: persona}."""
+    speakers: dict[str, str] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        language, sep, persona = (part.strip() for part in entry.partition("="))
+        if not sep or not language or not persona:
+            raise ValueError(f"SARVAM_TTS_SPEAKERS: malformed entry {entry!r}, expected language=persona_id")
+        if not _LANGUAGE.match(language):
+            raise ValueError(f"SARVAM_TTS_SPEAKERS: {language!r} is not a language code like hi-IN")
+        if not _PERSONA.match(persona):
+            raise ValueError(
+                f"SARVAM_TTS_SPEAKERS: {persona!r} is not a Bulbul v4 persona ID (voice_language_style, "
+                "e.g. aparna_hi_customer); v3 names like 'shubh' are rejected by bulbul:v4-flash"
+            )
+        speakers[language] = persona
+    return speakers
+
+
+class DatabaseSettings(BaseSettings):
+    """Only what DB tooling (migrations, seed) needs; no API keys required."""
+
+    model_config = SettingsConfigDict(
+        env_file=(REPO_ROOT / ".env", ".env"), env_file_encoding="utf-8", extra="ignore"
+    )
+
+    database_url: str = Field(description="postgresql+asyncpg://user:pass@host:port/db")
+
+
+class Settings(DatabaseSettings):
+    # LLM via OpenRouter (docs/engine.md#llm-provider)
+    openrouter_api_key: str = ""
+    llm_model: str = "openai/gpt-6-luna"
+    llm_fallback_models: Annotated[list[str], NoDecode] = []
+    llm_timeout_s: float = 8.0
+    use_fake_llm: bool = False
+
+    # Sarvam speech (docs/voice.md)
+    sarvam_api_key: str = ""
+    # Language -> Bulbul v4 persona from SARVAM_TTS_SPEAKERS ("hi-IN=aparna_hi_customer,te-IN=<id>").
+    # A language with no entry uses Sarvam's default voice.
+    sarvam_tts_speakers: Annotated[dict[str, str], NoDecode] = {}
+    use_fake_speech: bool = False
+
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000", "http://localhost:3001"]
+    log_level: str = "INFO"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _split_csv(cls, data: dict) -> dict:
+        for key in ("llm_fallback_models", "cors_origins"):
+            for k in (key, key.upper()):
+                if isinstance(data.get(k), str):
+                    data[k] = [v.strip() for v in data[k].split(",") if v.strip()]
+        for k in ("sarvam_tts_speakers", "SARVAM_TTS_SPEAKERS"):
+            if isinstance(data.get(k), str):
+                data[k] = parse_speaker_map(data[k])
+        return data
+
+    @model_validator(mode="after")
+    def _require_keys(self) -> "Settings":
+        missing = []
+        if not self.use_fake_llm and not self.openrouter_api_key:
+            missing.append("OPENROUTER_API_KEY (or set USE_FAKE_LLM=true)")
+        if not self.use_fake_speech and not self.sarvam_api_key:
+            missing.append("SARVAM_API_KEY (or set USE_FAKE_SPEECH=true)")
+        if missing:
+            raise ValueError("Missing required settings: " + ", ".join(missing))
+        return self
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
