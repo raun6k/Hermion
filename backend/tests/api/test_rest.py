@@ -56,7 +56,14 @@ def test_unbuilt_routes_return_501(client: TestClient) -> None:
         assert r.json()["error"]["code"] == "NOT_IMPLEMENTED"
 
 
-def test_tts_test_clip_is_wav(client: TestClient) -> None:
-    r = client.get("/dev/tts-test?lang=hi-IN")
-    assert r.status_code == 200
-    assert r.content[:4] == b"RIFF"
+def test_tts_test_clip_any_supported_language(client: TestClient) -> None:
+    for lang in ("hi-IN", "kn-IN", "od-IN"):
+        r = client.get(f"/dev/tts-test?lang={lang}")
+        assert r.status_code == 200, lang
+        assert r.content[:4] == b"RIFF"
+
+
+def test_tts_test_clip_rejects_unsupported_language(client: TestClient) -> None:
+    r = client.get("/dev/tts-test?lang=fr-FR")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "UNSUPPORTED_LANGUAGE"

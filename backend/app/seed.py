@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import DatabaseSettings
 from app.db.models import BasketLine, Goal, Mandate, Merchant, Message, Offer, Product, Session
+from app.schemas.merchant import MerchantProfile
 
 SEED_DIR = Path(__file__).resolve().parents[1] / "seed"
 log = logging.getLogger("seed")
@@ -46,7 +47,8 @@ def load_products(path: Path) -> list[Product]:
 
 
 async def seed(db: AsyncSession, seed_dir: Path = SEED_DIR) -> None:
-    merchant = Merchant(**json.loads((seed_dir / "merchant.json").read_text(encoding="utf-8")))
+    profile = MerchantProfile.model_validate_json((seed_dir / "merchant.json").read_text(encoding="utf-8"))
+    merchant = Merchant(**profile.model_dump())
     goals = [Goal(**g) for g in json.loads((seed_dir / "merchant_goals.json").read_text(encoding="utf-8"))]
     products = load_products(seed_dir / "products.csv")
 

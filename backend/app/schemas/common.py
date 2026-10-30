@@ -4,10 +4,26 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, PlainSerializer
+from pydantic import AfterValidator, BaseModel, ConfigDict, PlainSerializer
+
+from app import languages
 
 # Rupees as Decimal in Python, string on the wire ("850.00").
 Money = Annotated[Decimal, PlainSerializer(lambda v: f"{v:.2f}", return_type=str, when_used="json")]
+
+
+def _language_list(codes: list[str]) -> list[str]:
+    if not codes:
+        raise ValueError("at least one language is required")
+    if len(set(codes)) != len(codes):
+        raise ValueError("languages must not repeat")
+    for code in codes:
+        languages.require(code)
+    return codes
+
+
+# A shop's languages: Sarvam codes from app/languages.py; the first is the merchant's own.
+LanguageList = Annotated[list[str], AfterValidator(_language_list)]
 
 
 class Schema(BaseModel):

@@ -7,14 +7,14 @@ from uuid import UUID
 
 from pydantic import Field
 
-from app.schemas.common import Money, Schema, SessionStateName
+from app.schemas.common import LanguageList, Money, Schema, SessionStateName
 
 
 class MerchantProfile(Schema):
     merchant_id: str
     shop_name: str
     shop_description: str
-    languages: list[str]
+    languages: LanguageList
     negotiation_instructions: str
     bundle_allowed: bool
     qr_token: str
@@ -23,7 +23,7 @@ class MerchantProfile(Schema):
 class MerchantPatch(Schema):
     shop_name: str | None = None
     shop_description: str | None = None
-    languages: list[str] | None = None
+    languages: LanguageList | None = None
     negotiation_instructions: str | None = None
     bundle_allowed: bool | None = None
 

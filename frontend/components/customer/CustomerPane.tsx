@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { playWavUrl } from "@/lib/audio";
-import { DEMO_QR_TOKEN, USE_MOCKS } from "@/lib/config";
+import { DEMO_CUSTOMER_LANGUAGE, DEMO_QR_TOKEN, USE_MOCKS } from "@/lib/config";
 import { getDeviceId } from "@/lib/device";
 import { connectCustomer, type Connection } from "@/lib/ws";
 import { MOCK_SESSION_ID } from "@/mocks/demoSession";
@@ -125,7 +125,7 @@ export function CustomerPane() {
         )}
         {error && <p className="mt-2 text-center text-xs text-red-700">{error}</p>}
         <button
-          onClick={() => playWavUrl(api.ttsTestUrl("te-IN")).catch((e: Error) => setError(e.message))}
+          onClick={() => playWavUrl(api.ttsTestUrl(DEMO_CUSTOMER_LANGUAGE)).catch((e: Error) => setError(e.message))}
           className="mt-2 text-xs text-slate-500 underline"
           data-testid="tts-test"
         >

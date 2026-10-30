@@ -8,10 +8,11 @@ from typing import Annotated
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from app import languages
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-_LANGUAGE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")  # BCP-47 as Sarvam uses it: hi-IN, te-IN, en-IN
 _PERSONA = re.compile(r"^[a-z0-9]+(_[a-z0-9]+){2,}$")  # v4 voice_language_style, e.g. aparna_hi_customer
 
 
@@ -25,8 +26,13 @@ def parse_speaker_map(raw: str) -> dict[str, str]:
         language, sep, persona = (part.strip() for part in entry.partition("="))
         if not sep or not language or not persona:
             raise ValueError(f"SARVAM_TTS_SPEAKERS: malformed entry {entry!r}, expected language=persona_id")
-        if not _LANGUAGE.match(language):
-            raise ValueError(f"SARVAM_TTS_SPEAKERS: {language!r} is not a language code like hi-IN")
+        if not languages.is_supported(language):
+            raise ValueError(
+                f"SARVAM_TTS_SPEAKERS: {language!r} is not a supported language code "
+                f"({', '.join(languages.LANGUAGES)}; see docs/voice.md#languages)"
+            )
+        if not languages.LANGUAGES[language].has_v4_voice:
+            raise ValueError(f"SARVAM_TTS_SPEAKERS: bulbul:v4-flash has no personas for {language} (Q18)")
         if not _PERSONA.match(persona):
             raise ValueError(
                 f"SARVAM_TTS_SPEAKERS: {persona!r} is not a Bulbul v4 persona ID (voice_language_style, "

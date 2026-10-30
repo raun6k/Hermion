@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 
 import websockets
 
+from app import languages
 from app.config import Settings
 from app.speech.sarvam import AUTH_HEADER, SARVAM_WS, SarvamError, event_name, parse, payload
 
@@ -40,7 +41,7 @@ class SarvamRealtimeSTT:
     def _url(self, language_code: str) -> str:
         query = {
             "model": self._model,
-            "language_code": language_code,
+            "language_code": languages.to_stt_code(language_code),  # "auto" passes through
             "mode": self._mode,
             "stream_type": "fast",
             "sample_rate": SAMPLE_RATE,
@@ -89,7 +90,8 @@ class SarvamRealtimeSTT:
             finally:
                 final.cancel()
             texts.append(str(data.get("text", "")))
-            language = data.get("language")
+            detected = data.get("language")
+            language = languages.from_stt_code(detected) if detected else None
             await ws.send(json.dumps({"event": "end"}))
         if not texts:
             raise SarvamError("STT closed without a final transcript")

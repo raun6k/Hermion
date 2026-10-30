@@ -41,5 +41,6 @@ export const api = {
   // merchant
   merchant: () => request<MerchantProfile>("/merchant"),
   products: () => request<Product[]>("/merchant/products"),
-  ttsTestUrl: (lang: "te-IN" | "hi-IN") => `${API_URL}/dev/tts-test?lang=${lang}`,
+  // Any supported code (backend app/languages.py), e.g. the shop's first customer language.
+  ttsTestUrl: (lang: string) => `${API_URL}/dev/tts-test?lang=${encodeURIComponent(lang)}`,
 };

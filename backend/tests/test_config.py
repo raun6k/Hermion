@@ -58,7 +58,9 @@ def test_speaker_map_skips_empty_entries() -> None:
         ("hi-IN", "malformed entry 'hi-IN'"),
         ("hi-IN=", "malformed entry 'hi-IN='"),
         ("=aparna_hi_customer", "malformed entry"),
-        ("hindi=aparna_hi_customer", "not a language code"),
+        ("hindi=aparna_hi_customer", "not a supported language code"),
+        ("xx-IN=aparna_hi_customer", "not a supported language code"),
+        ("ml-IN=some_ml_voice", "no personas for ml-IN"),
         ("hi-IN=shubh", "not a Bulbul v4 persona ID"),
     ],
 )
