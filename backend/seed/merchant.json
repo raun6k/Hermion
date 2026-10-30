@@ -2,7 +2,7 @@
   "merchant_id": "M001",
   "shop_name": "Lakshmi Fashions",
   "shop_description": "Men's and women's everyday clothing and accessories in Ameerpet, Hyderabad",
-  "languages": ["hi", "te", "kn", "en"],
+  "languages": ["hi-IN", "te-IN", "kn-IN", "en-IN"],
   "negotiation_instructions": "Hold the price at first. Suggest quantity deals. Always be polite and warm.",
   "bundle_allowed": true,
   "qr_token": "hermion-m001-demo"
