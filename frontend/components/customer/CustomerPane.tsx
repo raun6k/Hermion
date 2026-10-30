@@ -1,137 +1,243 @@
 "use client";
 
-// Walking skeleton of the customer phone: start session, keypad text, transcript, end call, test audio.
-// Drag-to-scan, mascot states, captions and basket come in lane C; voice in lane V.
-import { useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
-import { playWavUrl } from "@/lib/audio";
-import { DEMO_CUSTOMER_LANGUAGE, DEMO_QR_TOKEN, USE_MOCKS } from "@/lib/config";
+// Customer pane: a voice call in a phone frame (docs/frontend.md). Scan QR reveals the draggable scanner,
+// then the call: captions, basket chip, mute / end / More. All network access goes through lib/api and
+// lib/ws; this pane shares no state with the merchant pane. Voice arrives with the Stage 3 pipeline; until
+// then the More sheet's text box is the input.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, ApiError } from "@/lib/api";
+import { TtsPlayer } from "@/lib/audio";
 import { getDeviceId } from "@/lib/device";
 import { connectCustomer, type Connection } from "@/lib/ws";
-import { MOCK_SESSION_ID } from "@/mocks/demoSession";
-import type { AgentState, CustomerInbound, CustomerOutbound, SessionState } from "@/lib/types";
+import { TERMINAL_STATES } from "@/lib/types";
+import type { AgentState, BasketLinePublic, CustomerInbound, CustomerOutbound, SessionState } from "@/lib/types";
+import { BasketChip, BasketSheet } from "./BasketSheet";
+import { CallControls } from "./CallControls";
+import { Caption, type CaptionLine } from "./Caption";
+import { Mascot } from "./Mascot";
+import { MoreSheet } from "./MoreSheet";
+import { PhoneFrame } from "./PhoneFrame";
+import { Scanner } from "./Scanner";
 
 interface Line {
   speaker: "customer" | "hermion";
   text: string;
 }
 
+const WAITING: SessionState[] = ["pending_merchant", "briefing"];
+
 export function CustomerPane() {
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [state, setState] = useState<SessionState | null>(null);
+  const [stateMessage, setStateMessage] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentState>("idle");
-  const [lines, setLines] = useState<Line[]>([]);
-  const [draft, setDraft] = useState("");
+  const [transcript, setTranscript] = useState<Line[]>([]);
+  const [caption, setCaption] = useState<CaptionLine | null>(null);
+  const [basket, setBasket] = useState<{ lines: BasketLinePublic[]; total: string }>({ lines: [], total: "0" });
+  const [muted, setMuted] = useState(false);
+  const [more, setMore] = useState(false);
+  const [sheet, setSheet] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const conn = useRef<Connection<CustomerInbound> | null>(null);
+  const player = useRef<TtsPlayer | null>(null);
 
   useEffect(() => {
     if (!sessionId) return;
-    const c = connectCustomer(sessionId, (e: CustomerOutbound) => {
-      if (e.type === "state") setState(e.state);
-      else if (e.type === "agent_state") setAgent(e.state);
-      else if (e.type === "transcript") setLines((l) => [...l, { speaker: e.speaker, text: e.text }]);
-      else if (e.type === "error") setError(e.message);
-    });
+    player.current ??= new TtsPlayer();
+    const c = connectCustomer(
+      sessionId,
+      (e: CustomerOutbound) => {
+        if (e.type === "state") {
+          setState(e.state);
+          setStateMessage(e.message);
+          if (e.state !== "negotiating" && e.state !== "discovery") {
+            setSheet(false);
+            setMore(false);
+          }
+        } else if (e.type === "agent_state") setAgent(e.state);
+        else if (e.type === "transcript") setTranscript((t) => [...t, { speaker: e.speaker, text: e.text }]);
+        else if (e.type === "caption") setCaption({ speaker: e.speaker, product_name: e.product_name, amount: e.amount });
+        else if (e.type === "basket") setBasket({ lines: e.lines, total: e.total });
+        else if (e.type === "tts_stop") player.current?.stop();
+        else if (e.type === "error") setError(e.message);
+      },
+      { onBinary: (chunk) => player.current?.enqueue(chunk) },
+    );
     conn.current = c;
-    return () => c.close();
+    return () => {
+      c.close();
+      player.current?.stop();
+    };
   }, [sessionId]);
 
-  async function start() {
+  const reset = useCallback(() => {
+    setSessionId(null);
+    setScanning(false);
+    setState(null);
+    setStateMessage(null);
+    setAgent("idle");
+    setTranscript([]);
+    setCaption(null);
+    setBasket({ lines: [], total: "0" });
+    setSheet(false);
+    setMore(false);
+    setMuted(false);
+    setConfirmError(null);
+  }, []);
+
+  async function scan(qrToken: string) {
     setError(null);
-    setLines([]);
     try {
-      const id = USE_MOCKS
-        ? MOCK_SESSION_ID
-        : (await api.createSession({ qr_token: DEMO_QR_TOKEN, device_id: getDeviceId() })).session_id;
-      setSessionId(id);
+      const { session_id } = await api.createSession({ qr_token: qrToken, device_id: getDeviceId() });
+      reset();
+      setSessionId(session_id); // the scanner disappears and stays away for the whole session
     } catch (e) {
-      setError((e as Error).message);
+      setError(e instanceof ApiError ? e.message : "Could not start the session");
     }
   }
 
-  async function end() {
-    if (sessionId && !USE_MOCKS) await api.exitSession(sessionId).catch(() => {});
-    conn.current?.close();
-    setSessionId(null);
-    setState(null);
-    setAgent("idle");
+  async function endCall() {
+    const id = sessionId;
+    reset();
+    if (id) await api.exitSession(id).catch(() => {});
   }
 
-  function sendText() {
-    const text = draft.trim();
-    if (!text || !conn.current) return;
-    conn.current.send({ type: "text_input", text });
-    setDraft("");
+  async function confirmAndSend() {
+    if (!sessionId) return;
+    setBusy(true);
+    setConfirmError(null);
+    try {
+      await api.confirm(sessionId);
+      setSheet(false);
+    } catch (e) {
+      setConfirmError(e instanceof ApiError ? e.message : "Could not send the basket");
+    } finally {
+      setBusy(false);
+    }
   }
+
+  const terminal = state !== null && TERMINAL_STATES.includes(state);
+  const inCall = sessionId !== null && !terminal;
+  const waiting = state !== null && WAITING.includes(state);
+  const inPerson = state === "in_person";
+  const canType = inCall && !waiting && !inPerson;
+  const lastLine = transcript.length ? transcript[transcript.length - 1] : null;
+  const mascot: AgentState = state === "accepted" ? "happy" : waiting ? "thinking" : agent;
+  const card = "mx-6 rounded-2xl bg-white px-4 py-3 text-center text-sm font-medium text-blue-950 shadow";
 
   return (
-    <section className="flex h-full items-center justify-center bg-indigo-100 p-4" data-testid="customer-pane">
-      <div className="flex h-[640px] w-[320px] flex-col rounded-[40px] border-8 border-slate-900 bg-gradient-to-b from-sky-100 to-violet-200 p-4 shadow-xl">
-        <div className="mx-auto mb-3 h-6 w-24 rounded-full bg-slate-900" />
+    <section className="relative flex h-full items-center justify-center bg-black p-4" data-testid="customer-pane">
+      <PhoneFrame
+        status={
+          sessionId ? (
+            <span data-testid="session-status">
+              Hermion · {state ?? "connecting"} · <span data-testid="agent-state">{agent}</span>
+            </span>
+          ) : null
+        }
+        overlay={!sessionId && scanning ? <Scanner onScan={scan} onCancel={() => setScanning(false)} /> : null}
+      >
         {!sessionId ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-            <p className="text-slate-700">Scan the shop&apos;s QR to start</p>
-            <button
-              onClick={start}
-              className="rounded-full bg-slate-900 px-5 py-2 text-white"
-              data-testid="start-session"
-            >
-              Start session
-            </button>
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center" data-testid="scan-prompt">
+            <Mascot state="idle" />
+            <p className="text-lg font-semibold">Bargain with Hermion</p>
+            {scanning ? (
+              <p className="text-sm text-white/70">Drag the scanner onto the shop&apos;s QR code.</p>
+            ) : (
+              <>
+                <p className="text-sm text-white/70">Scan the shop&apos;s QR code to start a call.</p>
+                <button onClick={() => setScanning(true)} className="rounded-full bg-pink-300 px-6 py-2.5 text-sm font-semibold text-blue-950 shadow-lg" data-testid="scan-qr">
+                  Scan QR
+                </button>
+              </>
+            )}
+            {error && <p className="max-w-60 rounded-lg bg-white/10 px-3 py-2 text-xs text-pink-200" role="alert" data-testid="customer-error">{error}</p>}
           </div>
         ) : (
           <>
-            <p className="text-center text-xs text-slate-600" data-testid="session-status">
-              Hermion · {state ?? "connecting"} · <span data-testid="agent-state">{agent}</span>
-            </p>
-            <ol className="my-3 flex-1 space-y-2 overflow-y-auto text-sm" data-testid="customer-transcript">
-              {lines.map((l, i) => (
-                <li
-                  key={i}
-                  className={`rounded-xl px-3 py-2 ${l.speaker === "customer" ? "ml-8 bg-white" : "mr-8 bg-slate-900 text-white"}`}
-                >
-                  {l.text}
-                </li>
-              ))}
-            </ol>
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                sendText();
-              }}
-            >
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Type to Hermion…"
-                className="min-w-0 flex-1 rounded-full bg-white px-3 py-2 text-sm outline-none"
-                data-testid="keypad-input"
+            {basket.lines.length > 0 && inCall && (
+              <BasketChip
+                count={basket.lines.length}
+                total={basket.total}
+                onClick={() => {
+                  setMore(false);
+                  setSheet(true);
+                }}
               />
-              <button className="rounded-full bg-slate-900 px-3 text-sm text-white" data-testid="keypad-send">
-                Send
-              </button>
-            </form>
-            <button
-              onClick={end}
-              className="mx-auto mt-3 h-12 w-12 rounded-full bg-red-600 text-white"
-              aria-label="End call"
-              data-testid="end-call"
-            >
-              ✕
-            </button>
+            )}
+            <div className="flex flex-1 flex-col justify-center">
+              <Mascot state={mascot} />
+              <Caption caption={caption} line={lastLine} />
+              {waiting && (
+                <p className={card} data-testid="waiting">
+                  {stateMessage ?? "The shop is reviewing your basket…"}
+                </p>
+              )}
+              {inPerson && (
+                <p className={card} data-testid="in-person-note">
+                  {stateMessage ?? "The shopkeeper is coming to you"}
+                </p>
+              )}
+              {terminal && (
+                <div className="mx-6 space-y-3 rounded-2xl bg-white p-4 text-center text-blue-950 shadow" data-testid="result" data-state={state}>
+                  <p className="text-sm font-semibold">
+                    {state === "accepted" ? "Deal confirmed" : state === "declined" ? "Not this time" : "Call ended"}
+                  </p>
+                  {stateMessage && <p className="text-sm text-slate-600">{stateMessage}</p>}
+                  {basket.lines.length > 0 && state === "accepted" && (
+                    <ul className="text-sm text-slate-700">
+                      {basket.lines.map((l) => (
+                        <li key={l.product_id}>{l.product_name} · ₹{Number(l.line_total).toLocaleString("en-IN")}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <button onClick={reset} className="rounded-full bg-blue-900 px-5 py-2 text-sm text-white" data-testid="done">Done</button>
+                </div>
+              )}
+            </div>
+            {inCall && (
+              <CallControls
+                muted={muted}
+                moreOpen={more}
+                onMute={() => {
+                  conn.current?.send({ type: "mute", muted: !muted });
+                  setMuted(!muted);
+                }}
+                onEnd={endCall}
+                onMore={() => setMore((m) => !m)}
+              />
+            )}
+            {more && inCall && (
+              <MoreSheet
+                sessionId={sessionId}
+                conversation={transcript}
+                basketCount={basket.lines.length}
+                canType={canType}
+                onViewBasket={() => {
+                  setMore(false);
+                  setSheet(true);
+                }}
+                onSend={(text) => conn.current?.send({ type: "text_input", text })}
+                onLanguage={(code) => conn.current?.send({ type: "language", code })}
+                onClose={() => setMore(false)}
+              />
+            )}
+            {sheet && inCall && (
+              <BasketSheet lines={basket.lines} total={basket.total} busy={busy} error={confirmError} onConfirm={confirmAndSend} onClose={() => setSheet(false)} />
+            )}
           </>
         )}
-        {error && <p className="mt-2 text-center text-xs text-red-700">{error}</p>}
-        <button
-          onClick={() => playWavUrl(api.ttsTestUrl(DEMO_CUSTOMER_LANGUAGE)).catch((e: Error) => setError(e.message))}
-          className="mt-2 text-xs text-slate-500 underline"
-          data-testid="tts-test"
-        >
-          Play TTS test clip
-        </button>
-      </div>
+      </PhoneFrame>
+
+      {/* Full transcript for assistive tech and tests. */}
+      <ol className="sr-only" data-testid="customer-transcript">
+        {transcript.map((l, i) => (
+          <li key={i}>{l.speaker}: {l.text}</li>
+        ))}
+      </ol>
     </section>
   );
 }

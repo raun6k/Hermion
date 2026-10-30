@@ -17,3 +17,47 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
+
+/* ---- customer phone: mascot, rings, scan (docs/frontend.md) ---- */
+@keyframes hm-ring {
+  0% { transform: scale(0.85); opacity: 0.55; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+@keyframes hm-bars {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
+@keyframes hm-orbit {
+  to { transform: rotate(360deg); }
+}
+@keyframes hm-dots {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(-6px); opacity: 1; }
+}
+@keyframes hm-sparkle {
+  0%, 100% { transform: scale(0.4) rotate(0deg); opacity: 0; }
+  50% { transform: scale(1) rotate(45deg); opacity: 1; }
+}
+@keyframes hm-scan {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(100%); }
+}
+@keyframes hm-flash {
+  0% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+@keyframes hm-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+.hm-ring { animation: hm-ring 1.6s ease-out infinite; }
+.hm-bar { transform-origin: center; animation: hm-bars 0.9s ease-in-out infinite; }
+.hm-orbit { transform-origin: 100px 100px; animation: hm-orbit 3.2s linear infinite; }
+.hm-dot { animation: hm-dots 1.2s ease-in-out infinite; }
+.hm-sparkle { transform-origin: center; transform-box: fill-box; animation: hm-sparkle 1.4s ease-in-out infinite; }
+.hm-float { animation: hm-float 3s ease-in-out infinite; }
+.hm-scanline { animation: hm-scan 0.7s linear forwards; }
+.hm-flash { animation: hm-flash 0.45s ease-out forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .hm-ring, .hm-bar, .hm-orbit, .hm-dot, .hm-sparkle, .hm-float, .hm-scanline { animation: none; }
+}

@@ -1,6 +1,7 @@
 """Customer WebSocket /ws/sessions/{id} (docs/api.md#websocket-customer-wssessionsid).
 
-Walking skeleton: keypad text -> one LLM call -> transcript back; both messages traced.
+Integration seam (lane B owns it). Connect replays state, basket, agent_state and the last 20 transcripts.
+Turn handling is still the skeleton: keypad text -> one LLM call -> transcript back; both messages traced.
 """
 
 import logging
@@ -16,13 +17,16 @@ from app.log import session_id as session_id_ctx
 from app.schemas.common import AgentState
 from app.schemas.events import (
     AgentStateEvent,
+    BasketEvent,
     ErrorEvent,
     StateEvent,
     TextInput,
     TranscriptEvent,
     customer_inbound_adapter,
 )
-from app.services import trace
+from app.services import trace, views
+
+REPLAY_TRANSCRIPTS = 20
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,10 +45,16 @@ async def customer_ws(ws: WebSocket, session_id: UUID) -> None:
         state.customer_hub.set(session_id, ws)
 
         async def send(event) -> None:
-            await ws.send_json(event.model_dump(mode="json"))
+            await state.customer_hub.send(session_id, event)  # also remembers agent_state for replay
 
+        # Reconnect replay (docs/api.md#reconnect): state, basket, last agent_state, last transcripts.
         await send(StateEvent(state=session.state))
-        await send(AgentStateEvent(state=AgentState.idle))
+        basket = await views.public_basket(db, session_id)
+        if basket.lines:
+            await send(BasketEvent(lines=basket.lines, total=basket.total))
+        await send(AgentStateEvent(state=AgentState(state.customer_hub.last_agent_state(session_id))))
+        for msg in await views.recent_transcripts(db, session_id, REPLAY_TRANSCRIPTS):
+            await send(TranscriptEvent(speaker=msg.speaker, text=msg.text))
         try:
             while True:
                 raw = await ws.receive_json()

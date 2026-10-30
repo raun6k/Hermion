@@ -1,6 +1,7 @@
 """In-process WebSocket fan-out. One backend process, so no broker (docs/architecture.md)."""
 
 import logging
+from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import WebSocket
@@ -37,14 +38,31 @@ class CustomerHub:
 
     def __init__(self) -> None:
         self._sockets: dict[UUID, WebSocket] = {}
+        self._agent_state: dict[UUID, str] = {}  # last mascot state, replayed on reconnect
 
     def set(self, session_id: UUID, ws: WebSocket) -> None:
         self._sockets[session_id] = ws
+
+    def last_agent_state(self, session_id: UUID) -> str:
+        return self._agent_state.get(session_id, "idle")
 
     def remove(self, session_id: UUID, ws: WebSocket) -> None:
         if self._sockets.get(session_id) is ws:
             del self._sockets[session_id]
 
     async def send(self, session_id: UUID, event: Schema) -> None:
+        payload = event.model_dump(mode="json")
+        if payload.get("type") == "agent_state":
+            self._agent_state[session_id] = payload["state"]
         if ws := self._sockets.get(session_id):
-            await ws.send_json(event.model_dump(mode="json"))
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                log.warning("dropping dead customer socket")
+                self.remove(session_id, ws)
+
+
+@dataclass(frozen=True)
+class Hubs:
+    merchant: MerchantHub
+    customer: CustomerHub

@@ -61,3 +61,10 @@ def client() -> Iterator[TestClient]:
 
     with TestClient(create_app()) as c:
         yield c
+
+
+@pytest.fixture
+def reseed() -> Iterator[None]:
+    """Restore seed data after a test that changes stock or leaves sessions behind."""
+    yield
+    asyncio.run(_seed())

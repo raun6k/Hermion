@@ -62,5 +62,5 @@ e2e: db  ## Playwright: full slice through real backend (fake LLM) + frontend
 smoke:  ## Live OpenRouter + Sarvam checks, per voiced language or LANGS="kn-IN ta-IN" (costs credits)
 	$(BACKEND) python -m scripts.smoke $(LANGS)
 
-eval:  ## Agent scenario eval (Stage 2)
-	@echo "Not built yet: tests/eval/run_scenarios.py arrives in Stage 2 (docs/build-plan.md)." && exit 1
+eval: db  ## Agent scenario eval: hard bars must be 0 (offline fake LLM until the Stage 2 loop is wired)
+	$(BACKEND) python -m tests.eval.run_scenarios

@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.db.session import dispose_engine
 from app.log import request_id, setup_logging
 from app.schemas.common import AppError
-from app.services.hub import CustomerHub, MerchantHub
+from app.services.hub import CustomerHub, Hubs, MerchantHub
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     app.state.llm = build_llm_client(settings)
     app.state.merchant_hub = MerchantHub()
     app.state.customer_hub = CustomerHub()
+    app.state.hubs = Hubs(app.state.merchant_hub, app.state.customer_hub)
     log.info(
         "hermion backend up (llm=%s, fake_llm=%s, fake_speech=%s)",
         settings.llm_model,
@@ -38,8 +39,11 @@ async def lifespan(app: FastAPI):
     await dispose_engine()
 
 
-def _error(status: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+def _error(status: int, code: str, message: str, field: str | None = None) -> JSONResponse:
+    body = {"code": code, "message": message}
+    if field:
+        body["field"] = field
+    return JSONResponse(status_code=status, content={"error": body})
 
 
 def create_app() -> FastAPI:
@@ -61,7 +65,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(AppError)
     async def _app_error(_: Request, exc: AppError) -> JSONResponse:
-        return _error(exc.status, exc.code, exc.message)
+        return _error(exc.status, exc.code, exc.message, exc.field)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:

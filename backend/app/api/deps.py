@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.llm_client import LLMClient
 from app.db.session import get_db
-from app.services.hub import CustomerHub, MerchantHub
+from app.services.hub import CustomerHub, Hubs, MerchantHub
 
 
 def _state(conn: Request | WebSocket):
@@ -26,5 +26,10 @@ def get_customer_hub(request: Request) -> CustomerHub:
     return _state(request).customer_hub
 
 
+def get_hubs(request: Request) -> Hubs:
+    return _state(request).hubs
+
+
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 MerchantHubDep = Annotated[MerchantHub, Depends(get_merchant_hub)]
+HubsDep = Annotated[Hubs, Depends(get_hubs)]

@@ -82,6 +82,8 @@ class SessionSummary(Schema):
     language: str | None
     started_at: datetime
     ended_at: datetime | None
+    line_count: int = 0
+    basket_total: Money | None = None
 
 
 class TraceMessage(Schema):
@@ -135,7 +137,9 @@ class MandateRule(Schema):
 class MandateProposal(Schema):
     mandate_id: UUID
     readable: str
-    rules: list[MandateRule]
+    rules: list[MandateRule]  # settle_at is the applied value, already clamped to [minimum, listed]
+    limited_product_ids: list[str] = Field(default_factory=list)  # asked outside the catalog limits
+    confirmed: bool = False
 
 
 class SessionTrace(Schema):
@@ -155,6 +159,14 @@ class ReviewAction(StrEnum):
 
 class ReviewRequest(Schema):
     action: ReviewAction
+
+
+class ReviewResponse(Schema):
+    state: SessionStateName
+
+
+class MandateConfirmResponse(Schema):
+    state: SessionStateName
 
 
 class BriefingRequest(Schema):

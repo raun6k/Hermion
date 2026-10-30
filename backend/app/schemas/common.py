@@ -54,6 +54,7 @@ class AgentState(StrEnum):
 class ErrorBody(Schema):
     code: str
     message: str
+    field: str | None = None  # set on VALIDATION_ERROR for a single offending input field
 
 
 class ErrorEnvelope(Schema):
@@ -63,9 +64,9 @@ class ErrorEnvelope(Schema):
 class AppError(Exception):
     """Raise anywhere; rendered as {"error": {code, message}} with `status`."""
 
-    def __init__(self, code: str, message: str, status: int = 400) -> None:
+    def __init__(self, code: str, message: str, status: int = 400, field: str | None = None) -> None:
         super().__init__(message)
-        self.code, self.message, self.status = code, message, status
+        self.code, self.message, self.status, self.field = code, message, status, field
 
 
 def not_implemented(what: str) -> AppError:

@@ -45,13 +45,11 @@ def test_validation_uses_error_envelope(client: TestClient) -> None:
 
 def test_unbuilt_routes_return_501(client: TestClient) -> None:
     sid = uuid.uuid4()
-    for method, path in [
-        ("get", "/merchant/stats"),
-        ("get", "/merchant/sessions"),
-        ("post", f"/sessions/{sid}/confirm"),
-        ("get", f"/merchant/sessions/{sid}"),
+    for method, path, body in [
+        ("get", "/merchant/stats", None),  # Stage 3
+        ("post", f"/merchant/sessions/{sid}/briefing", {"text": "hi"}),  # Stage 2
     ]:
-        r = getattr(client, method)(path)
+        r = getattr(client, method)(path, **({"json": body} if body else {}))
         assert r.status_code == 501, path
         assert r.json()["error"]["code"] == "NOT_IMPLEMENTED"
 
@@ -67,3 +65,33 @@ def test_tts_test_clip_rejects_unsupported_language(client: TestClient) -> None:
     r = client.get("/dev/tts-test?lang=fr-FR")
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "UNSUPPORTED_LANGUAGE"
+
+
+def test_dev_tts_stream_and_stt_socket(client: TestClient) -> None:
+    r = client.get("/dev/tts-stream?lang=te-IN&text=Namaskaram. Hello.")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("audio/L16;rate=24000")
+    assert len(r.content) == 2 * 3 * 2400 * 2  # two sentences x three 100 ms chunks, 16-bit
+    assert client.get("/dev/tts-stream?lang=fr-FR").status_code == 400
+
+    with client.websocket_connect("/dev/stt?lang=auto") as ws:
+        assert ws.receive_json() == {"type": "ready"}
+        for _ in range(10):
+            ws.send_bytes(b"\x01\x00" * 1600)
+        types = [ws.receive_json()["type"] for _ in range(4)]
+        assert types == ["speech_start", "partial", "speech_end", "final"]
+
+
+def test_customer_session_view_exposes_only_public_facts(client: TestClient) -> None:
+    sid = client.post("/sessions", json={"qr_token": QR, "device_id": f"d-{uuid.uuid4()}"}).json()[
+        "session_id"
+    ]
+    r = client.get(f"/sessions/{sid}")
+    assert r.status_code == 200
+    assert r.json() == {
+        "session_id": sid,
+        "state": "intro",
+        "language": None,
+        "languages": ["hi-IN", "te-IN", "kn-IN", "en-IN"],
+    }
+    assert client.get(f"/sessions/{uuid.uuid4()}").json()["error"]["code"] == "SESSION_NOT_FOUND"
+    client.post(f"/sessions/{sid}/exit")

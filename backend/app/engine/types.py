@@ -87,3 +87,5 @@ class Evaluation:
     price: Decimal | None = None
     line_prices: tuple[LinePrice, ...] = ()
     threshold: Decimal | None = None  # merchant-only; never shown to customer or LLM
+    signals: tuple[str, ...] = ()  # which of buy_now / qty / basket / clear_stock raised the round
+    mandate_applied: bool = False

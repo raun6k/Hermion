@@ -2,7 +2,7 @@
 
 A negotiation agent owned by the merchant, for small Indian shops. A customer bargains with Hermion by voice or keypad, a deterministic engine sets every price, and the merchant has the final call. Built for the Paytm Build for India AI Hackathon.
 
-**Status:** Stage 0, walking skeleton. Every layer is wired and tested with placeholder logic. Product features come in later stages.
+**Status:** Stage 1 done: engine, services and REST, agent building blocks, voice adapters and both UI panes (on mocks) are built and tested. The agent tool loop and text integration are Stage 2.
 
 ## Stack
 

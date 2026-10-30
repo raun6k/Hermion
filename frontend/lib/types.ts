@@ -19,12 +19,13 @@ export const TERMINAL_STATES: readonly SessionState[] = ["accepted", "declined",
 export type AgentState = "idle" | "listening" | "thinking" | "speaking" | "happy" | "negotiating";
 
 export interface ApiErrorBody {
-  error: { code: string; message: string };
+  error: { code: string; message: string; field?: string | null };
 }
 
 // ---- customer REST (public: never contains private fields) ----
 export interface SessionCreate { qr_token: string; device_id: string }
 export interface SessionCreated { session_id: string }
+export interface SessionPublic { session_id: string; state: SessionState; language: string | null; languages: string[] }
 export interface BasketLinePublic { product_id: string; product_name: string; qty: number; line_total: Money }
 export interface BasketPublic { lines: BasketLinePublic[]; total: Money }
 export interface ConfirmResponse { state: SessionState; basket: BasketPublic }
@@ -62,6 +63,8 @@ export interface SessionSummary {
   language: string | null;
   started_at: string;
   ended_at: string | null;
+  line_count: number;
+  basket_total: Money | null;
 }
 export interface TraceMessage {
   id: string;
@@ -81,8 +84,60 @@ export interface MerchantBasketLine {
   contribution: Money;
   below_minimum: boolean;
 }
+// listed_price is per unit; line_total is for the whole line (qty pieces).
 export interface MerchantBasket { lines: MerchantBasketLine[]; total: Money; contribution: Money }
 export type ReviewAction = "accept" | "decline" | "renegotiate_hermion" | "renegotiate_in_person";
+export interface ReviewResponse { state: SessionState }
+export interface MandateConfirmResponse { state: SessionState }
+
+export type ProductBase = Omit<Product, "product_id" | "merchant_id">;
+export type ProductCreate = ProductBase & { product_id: string };
+export type ProductPatch = Partial<ProductBase>;
+export type MerchantPatch = Partial<Omit<MerchantProfile, "merchant_id" | "qr_token">>;
+
+export interface TraceOffer {
+  id: string;
+  items: { product_id: string; qty: number }[];
+  offered_amount: Money;
+  offer_scope: "per_unit" | "line" | "basket";
+  signals: Record<string, unknown>;
+  decision: "accept" | "counter" | "reject";
+  price: Money | null;
+  line_prices: { product_id: string; qty: number; line_total: Money }[];
+  reason_code: string;
+  round: number;
+  final: boolean;
+  threshold: Money | null; // merchant-only
+  created_at: string;
+}
+export interface MandateRule {
+  product_id: string;
+  settle_at: Money;
+  when: { min_qty?: number; with_product_id?: string };
+}
+export interface MandateProposal {
+  mandate_id: string;
+  readable: string;
+  rules: MandateRule[];
+  limited_product_ids: string[];
+  confirmed: boolean;
+}
+export interface SessionTrace {
+  session: SessionSummary;
+  messages: TraceMessage[];
+  offers: TraceOffer[];
+  basket: MerchantBasket | null;
+  mandate: MandateProposal | null;
+}
+export interface BriefingResponse { reply: string; proposed_mandate: MandateProposal | null }
+export interface BasketEdit { lines: { product_id: string; qty: number; line_total: Money }[] }
+export interface Stats {
+  sessions: number;
+  offers: number;
+  deals: number;
+  avg_discount_pct: Money;
+  total_contribution: Money;
+}
 
 export interface HealthCheck { status: "ok" | "fake" | "error"; detail: string }
 export interface Health { status: "ok" | "error"; checks: Record<string, HealthCheck> }
@@ -108,5 +163,8 @@ export type CustomerOutbound =
 export type MerchantOutbound =
   | { type: "session_created"; session: SessionSummary }
   | { type: "session_state"; session_id: string; state: SessionState }
-  | { type: "trace"; session_id: string; kind: "message" | "offer" | "basket" | "mandate"; data: Record<string, unknown> }
+  | { type: "trace"; session_id: string; kind: "message"; data: TraceMessage }
+  | { type: "trace"; session_id: string; kind: "offer"; data: TraceOffer }
+  | { type: "trace"; session_id: string; kind: "basket"; data: { action: string; basket: MerchantBasket } & Record<string, unknown> }
+  | { type: "trace"; session_id: string; kind: "mandate"; data: { action: "proposed" | "confirmed"; mandate: MandateProposal } }
   | { type: "deal_request"; session_id: string; basket: MerchantBasket };
