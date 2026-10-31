@@ -1,0 +1,9 @@
+[
+  {
+    "goal_id": "G101",
+    "merchant_id": "M002",
+    "goal_type": "bigger_baskets",
+    "product_ids": [],
+    "instructions": "Suggest a case or charger with every phone."
+  }
+]

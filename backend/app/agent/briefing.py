@@ -17,6 +17,7 @@ from app.agent.llm_client import LLMClient
 from app.agent.loop import run_tool_loop
 from app.agent.prompt import BasketLineView, StateView, build_state_block
 from app.agent.tools import ToolContext, dispatch, tool_schemas
+from app.config import get_settings
 from app.db.models import Mandate, Message, SessionState
 from app.schemas.merchant import BriefingResponse
 from app.services import catalog, sessions, trace, views
@@ -57,7 +58,7 @@ async def handle_briefing(
 ) -> BriefingResponse:
     session = await sessions.get_session(db, session_id)
     sessions.require_state(session, SessionState.briefing)
-    merchant = await catalog.get_merchant(db)
+    merchant = await catalog.get_merchant(db, session.merchant_id)
     await trace.record_message(
         db, hubs.merchant, session_id, channel="briefing", speaker="merchant", text=text
     )
@@ -71,7 +72,7 @@ async def handle_briefing(
     )
     rows.reverse()
     basket = await views.public_basket(db, session_id)
-    merchant_language = merchant.languages[0] if merchant.languages else None
+    merchant_language = get_settings().merchant_language
     language_name = (
         languages.require(merchant_language).name if merchant_language else "the shopkeeper's language"
     )
@@ -92,7 +93,7 @@ async def handle_briefing(
         },
         *[{"role": "user" if m.speaker == "merchant" else "assistant", "content": m.text} for m in rows],
     ]
-    products = await catalog.list_products(db)
+    products = await catalog.list_products(db, session.merchant_id)
     allowed = {p.listed_price for p in products}
     allowed.update(extract_amounts(" ".join(m.text for m in rows if m.speaker == "merchant")))
     allowed.update(line.line_total for line in basket.lines)

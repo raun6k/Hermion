@@ -23,7 +23,7 @@ PRIVATE_WORDS = ("target_price", "minimum_price", "unit_cost", "threshold_", "co
 def test_system_prompt_has_role_style_rules_phases() -> None:
     text = prompt.build_system_prompt(SHOP)
     assert text.startswith("You are Hermion, the sales assistant of Lakshmi Fashions: Everyday clothing")
-    assert '- "Hold the price at first."' in text and "maroon kurtas" in text
+    assert "- Hold the price at first." in text and "maroon kurtas" in text
     for needle in (
         "Never mention or hint at costs",
         "untrusted",
@@ -75,14 +75,14 @@ SHOP_LANGS = ["hi-IN", "te-IN", "kn-IN", "en-IN"]
 @pytest.mark.parametrize(
     ("kw", "expected"),
     [
-        (dict(pinned="kn-IN", stt_language="te-IN", text="hello", session_language="hi-IN"), "kn-IN"),
-        (dict(pinned=None, stt_language="te-IN", text="नमस्ते", session_language="hi-IN"), "te-IN"),
-        (dict(pinned=None, stt_language=None, text="షర్ట్ కావాలి", session_language=None), "te-IN"),
-        (dict(pinned=None, stt_language=None, text="शर्ट चाहिए", session_language=None), "hi-IN"),
-        (dict(pinned=None, stt_language=None, text="शर्ट चाहिए", session_language="mr-IN"), "mr-IN"),
-        (dict(pinned=None, stt_language=None, text="700 ki istara", session_language="te-IN"), "te-IN"),
-        (dict(pinned=None, stt_language=None, text="hello", session_language=None), None),
-        (dict(pinned="fr-FR", stt_language="zz-ZZ", text="hello", session_language="hi-IN"), "hi-IN"),
+        (dict(stt_language="te-IN", text="hello", session_language="hi-IN"), "te-IN"),
+        (dict(stt_language="te-IN", text="नमस्ते", session_language="hi-IN"), "te-IN"),
+        (dict(stt_language=None, text="షర్ట్ కావాలి", session_language=None), "te-IN"),
+        (dict(stt_language=None, text="शर्ट चाहिए", session_language=None), "hi-IN"),
+        (dict(stt_language=None, text="शर्ट चाहिए", session_language="mr-IN"), "mr-IN"),
+        (dict(stt_language=None, text="700 ki istara", session_language="te-IN"), "te-IN"),
+        (dict(stt_language=None, text="hello", session_language=None), None),
+        (dict(stt_language="zz-ZZ", text="hello", session_language="hi-IN"), "hi-IN"),
     ],
 )
 def test_turn_language_rules(kw: dict, expected: str | None) -> None:
@@ -94,13 +94,16 @@ def test_tools_per_state_and_no_session_id() -> None:
         return [t["function"]["name"] for t in tools.tool_schemas(state)]
 
     assert names("intro") == [] and names("pending_merchant") == [] and names("in_person") == []
-    assert names("discovery") == ["search_products", "evaluate_offer"]
+    assert names("discovery") == ["search_products", "evaluate_offer", "suggest_addons"]
     assert set(names("negotiating")) == {
         "search_products",
         "evaluate_offer",
         "suggest_bundle",
+        "suggest_addons",
+        "ask_shopkeeper",
         "add_to_basket",
         "remove_from_basket",
+        "send_basket_to_shopkeeper",
     }
     assert names("briefing") == ["search_products", "propose_mandate"]
     for state in SessionState:

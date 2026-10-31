@@ -18,7 +18,8 @@ EDGES: dict[SessionState, frozenset[SessionState]] = {
     S.intro: frozenset({S.discovery}),
     S.discovery: frozenset({S.negotiating}),
     S.negotiating: frozenset({S.pending_merchant}),
-    S.pending_merchant: frozenset({S.accepted, S.declined, S.briefing, S.in_person}),
+    # pending_merchant -> negotiating: the customer rejoins Hermion to change the sent basket (withdraws it).
+    S.pending_merchant: frozenset({S.accepted, S.declined, S.briefing, S.in_person, S.negotiating}),
     S.briefing: frozenset({S.negotiating}),
     S.in_person: frozenset({S.accepted, S.declined}),
 }
@@ -39,20 +40,38 @@ def can_transition(current: SessionState, to: SessionState) -> bool:
     return to is S.exited or to in EDGES.get(current, frozenset())
 
 
-async def create_session(db: AsyncSession, qr_token: str, device_id: str) -> Session:
+async def get_or_create_session(
+    db: AsyncSession, qr_token: str, device_id: str, customer_name: str | None = None
+) -> tuple[Session, bool]:
+    """Scanning again resumes this device's live session at this shop; returns (session, created)."""
     merchant = await db.scalar(select(Merchant).where(Merchant.qr_token == qr_token))
     if merchant is None:
         raise AppError("UNKNOWN_QR", "This QR code does not belong to a Hermion shop", 404)
     active = await db.scalar(
-        select(Session).where(Session.device_id == device_id, Session.state.not_in(TERMINAL_STATES))
+        select(Session)
+        .where(
+            Session.merchant_id == merchant.merchant_id,
+            Session.device_id == device_id,
+            Session.state.not_in(TERMINAL_STATES),
+        )
+        .order_by(Session.started_at.desc())
     )
     if active is not None:
-        raise AppError("SESSION_ACTIVE", "Exit your current session to scan again", 409)
-    session = Session(merchant_id=merchant.merchant_id, device_id=device_id, state=SessionState.intro)
+        return active, False
+    session = Session(
+        merchant_id=merchant.merchant_id,
+        device_id=device_id,
+        state=SessionState.intro,
+        customer_name=customer_name,
+    )
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    return session
+    return session, True
+
+
+async def create_session(db: AsyncSession, qr_token: str, device_id: str) -> Session:
+    return (await get_or_create_session(db, qr_token, device_id))[0]
 
 
 async def get_session(db: AsyncSession, session_id: uuid.UUID) -> Session:
@@ -91,6 +110,16 @@ async def ensure_negotiating(db: AsyncSession, hubs: Hubs | None, session: Sessi
     if session.state is S.discovery:
         session = await transition(db, hubs, session.session_id, S.negotiating)
     return session
+
+
+async def rejoin(db: AsyncSession, hubs: Hubs | None, session_id: uuid.UUID) -> tuple[Session, bool]:
+    """The customer taps Talk to Hermion again. A basket waiting for the shop goes back to negotiating (the
+    merchant's review is withdrawn); returns (session, withdrawn). Discovery and negotiating are unchanged."""
+    session = await get_session(db, session_id)
+    if session.state is S.pending_merchant:
+        return await transition(db, hubs, session_id, S.negotiating), True
+    require_state(session, S.intro, S.discovery, S.negotiating)
+    return session, False
 
 
 async def exit_session(db: AsyncSession, hubs: Hubs | None, session_id: uuid.UUID) -> Session:

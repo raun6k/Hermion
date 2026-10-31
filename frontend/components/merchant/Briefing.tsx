@@ -94,8 +94,8 @@ export function Briefing({
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-violet-200 bg-white p-3" data-testid="briefing">
-      <p className="text-sm font-medium text-slate-800">Brief Hermion <span className="font-normal text-slate-500">(private; the customer does not see this)</span></p>
+    <div className="space-y-3 rounded-2xl border border-violet-200 bg-violet-50/40 p-4" data-testid="briefing">
+      <p className="text-sm font-semibold text-[#071844]">Tell Hermion what to offer <span className="font-normal text-[#415981]">(private; the customer never sees this)</span></p>
       <ol className="max-h-40 space-y-1.5 overflow-y-auto" data-testid="briefing-chat">
         {chat.length === 0 && (
           <li className="text-sm text-slate-400">e.g. “If they take the shirt at ₹850, give the belt for ₹300.”</li>

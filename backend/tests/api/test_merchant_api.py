@@ -259,3 +259,25 @@ def test_private_briefing_proposes_mandate(client: TestClient, reseed) -> None:
         client.post(f"/merchant/sessions/{sid}/mandates/{mandate_id}/confirm").json()["state"]
         == "negotiating"
     )
+
+
+def test_trace_links_tool_calls_to_their_offer(client: TestClient, reseed) -> None:
+    from app.services import trace as trace_service
+
+    sid = _new_session(client)
+
+    async def go(db):
+        hubs = new_hubs()
+        r = await offers.evaluate(
+            db, hubs, uuid.UUID(sid), [OfferItem("SHIRT-BLU-M", 1)], D(700), OfferScope.line, False
+        )
+        await trace_service.record_tool_call(
+            db, hubs.merchant, uuid.UUID(sid), "customer", "evaluate_offer", {"offered_amount": "700"}, r
+        )
+        return r["evaluation_id"]
+
+    evaluation_id = run_db(go)
+    body = client.get(f"/merchant/sessions/{sid}").json()
+    assert [o["id"] for o in body["offers"]] == [evaluation_id]
+    assert [t["evaluation_id"] for t in body["tool_calls"]] == [evaluation_id]
+    assert body["offers"][0]["profile"] and body["offers"][0]["headroom"]

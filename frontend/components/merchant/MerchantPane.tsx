@@ -1,34 +1,47 @@
 "use client";
 
-// Merchant console (docs/frontend.md): Catalog, Shop, Sessions, Stats tabs; review cards pinned under
-// the tabs; the shop QR pinned bottom-right. Talks to the backend only through lib/api and lib/ws.
+// Merchant console (docs/frontend.md): Customers, Approvals, Products, Shop, Insights tabs. Baskets and price checks
+// waiting for the merchant live only on the Approvals tab. Talks to the backend only through lib/api and lib/ws.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { api, setMerchantId } from "@/lib/api";
 import { USE_MOCKS } from "@/lib/config";
-import { shortId } from "@/lib/format";
+import { COPY } from "@/lib/copy";
+import { merchantAddress } from "@/lib/format";
 import { connectMerchant } from "@/lib/ws";
-import type { Health, MerchantProfile, Product, SessionSummary } from "@/lib/types";
+import type { MerchantChoice, MerchantProfile, Product, SessionSummary } from "@/lib/types";
+import { AvatarMenu } from "./AvatarMenu";
 import { Catalog } from "./Catalog";
+import { PriceCheckCard } from "./PriceCheckCard";
 import { ReviewCard } from "./ReviewCard";
 import { Sessions } from "./Sessions";
 import { Shop } from "./Shop";
-import { ShopQR } from "./ShopQR";
 import { Stats } from "./Stats";
 
-type Tab = "catalog" | "shop" | "sessions" | "stats";
+type Tab = "review" | "catalog" | "shop" | "sessions" | "stats";
 const TABS: { id: Tab; label: string }[] = [
-  { id: "catalog", label: "Catalog" },
-  { id: "shop", label: "Shop" },
-  { id: "sessions", label: "Sessions" },
-  { id: "stats", label: "Stats" },
+  { id: "sessions", label: COPY.tabs.sessions },
+  { id: "review", label: COPY.tabs.review },
+  { id: "catalog", label: COPY.tabs.catalog },
+  { id: "shop", label: COPY.tabs.shop },
+  { id: "stats", label: COPY.tabs.stats },
 ];
+const SHOP_KEY = "hermion.merchant";
 const REVIEW_STATES = ["pending_merchant", "briefing", "in_person"];
 
 export function MerchantPane() {
   const [tab, setTab] = useState<Tab>("sessions");
   const [shop, setShop] = useState<MerchantProfile | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
-  const [health, setHealth] = useState<Health | null>(null);
+  const [shops, setShops] = useState<MerchantChoice[]>([]);
+  const [shopId, setShopId] = useState<string | null>(() => {
+    try {
+      const saved = typeof localStorage === "undefined" ? null : localStorage.getItem(SHOP_KEY);
+      setMerchantId(saved);
+      return saved;
+    } catch {
+      return null;
+    }
+  });
   const [error, setError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Record<string, SessionSummary>>({});
   const [versions, setVersions] = useState<Record<string, number>>({});
@@ -38,15 +51,32 @@ export function MerchantPane() {
   const bump = useCallback((id: string) => setVersions((v) => ({ ...v, [id]: (v[id] ?? 0) + 1 })), []);
 
   useEffect(() => {
-    Promise.all([api.merchant(), api.products(), api.health().catch(() => null), api.sessions("live"), api.sessions("past")])
-      .then(([m, p, h, live, past]) => {
+    api.merchants().then(setShops).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    Promise.all([api.merchant(), api.products(), api.sessions("live"), api.sessions("past")])
+      .then(([m, p, live, past]) => {
         setShop(m);
+        setShopId(m.merchant_id);
         setProducts(p);
-        setHealth(h);
         setSessions(Object.fromEntries([...live, ...past].map((s) => [s.session_id, s])));
+        setError(null);
       })
       .catch((e: Error) => setError(e.message));
-  }, []);
+  }, [shopId]);
+
+  function switchShop(id: string) {
+    setMerchantId(id);
+    try {
+      localStorage.setItem(SHOP_KEY, id);
+    } catch {}
+    setShop(null);
+    setSessions({});
+    setSelected(null);
+    setShopId(id);
+    setStatsVersion((n) => n + 1);
+  }
 
   useEffect(() => {
     const conn = connectMerchant((e) => {
@@ -61,15 +91,19 @@ export function MerchantPane() {
         if (e.state === "accepted") api.products().then(setProducts).catch(() => {});
       } else {
         bump(e.session_id);
+        if (e.type === "trace" && e.kind === "timing") setStatsVersion((n) => n + 1);
         if (e.type === "deal_request" || (e.type === "trace" && e.kind === "basket"))
           api.sessions("live").then((live) => setSessions((s) => ({ ...s, ...Object.fromEntries(live.map((x) => [x.session_id, x])) }))).catch(() => {});
       }
-    });
+    }, shopId);
     return () => conn.close();
-  }, [bump]);
+  }, [bump, shopId]);
 
   const list = useMemo(() => Object.values(sessions).sort((a, b) => b.started_at.localeCompare(a.started_at)), [sessions]);
+  const checks = list.filter((s) => s.price_check);
   const reviews = list.filter((s) => REVIEW_STATES.includes(s.state));
+  const waiting = checks.length + reviews.length;
+  const headerAddress = shop ? merchantAddress(shop.shop_description) : "";
 
   function openTrace(id: string) {
     setSelected(id);
@@ -78,24 +112,21 @@ export function MerchantPane() {
 
   return (
     <section className="relative flex min-h-[760px] flex-col gap-4 overflow-hidden rounded-[26px] bg-[#dff4fc] p-5 text-[#081b4d] sm:p-6 lg:h-full lg:min-h-0" data-testid="merchant-pane">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-sky-200/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2 text-3xl font-bold tracking-tight text-[#071844]"><svg aria-hidden viewBox="0 0 24 24" className="h-7 w-7 fill-pink-600"><path d="M12 1c1.1 6.2 3.8 8.9 11 11-7.2 2.1-9.9 4.8-11 11C10.9 16.8 8.2 14.1 1 12 8.2 9.9 10.9 7.2 12 1Z" /></svg>Hermion</div>
-          <h1 className="pl-8 text-sm font-medium text-[#253d70]" data-testid="shop-name">
-            {shop?.shop_name ?? "Loading shop…"}
-            {USE_MOCKS && <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 align-middle text-xs font-normal text-amber-800">mock data</span>}
-          </h1>
-          <p className="pl-8 text-xs text-[#415981]">Merchant console · {products.length ? `${products.length} products in catalog` : "– products in catalog"}</p>
+      <header className="sticky top-0 z-10 -mx-1 flex items-center justify-between gap-3 rounded-2xl bg-[#dff4fc]/95 px-1 pb-3 backdrop-blur">
+        <div className="flex min-w-0 items-center gap-4">
+          <span className="flex shrink-0 items-center gap-1.5 text-xl font-bold tracking-tight text-[#071844]"><svg aria-hidden viewBox="0 0 24 24" className="h-6 w-6 fill-pink-600"><path d="M12 1c1.1 6.2 3.8 8.9 11 11-7.2 2.1-9.9 4.8-11 11C10.9 16.8 8.2 14.1 1 12 8.2 9.9 10.9 7.2 12 1Z" /></svg>Hermion</span>
+          <span className="h-8 w-px shrink-0 bg-sky-200" aria-hidden />
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-bold leading-tight text-[#071844]" data-testid="shop-name">
+              {shop?.shop_name ?? "Loading shop…"}
+              {USE_MOCKS && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 align-middle text-[10px] font-semibold text-amber-800">sample data</span>}
+            </h1>
+            {headerAddress && <p className="truncate text-xs text-[#415981]" data-testid="shop-address">{headerAddress}</p>}
+          </div>
         </div>
-        {health && (
-          <ul className="flex gap-2 text-xs" data-testid="health">
-            {Object.entries(health.checks).map(([name, c]) => (
-              <li key={name} className={`rounded px-2 py-1 ${c.status === "error" ? "bg-red-100 text-red-700" : c.status === "fake" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
-                {name}: {c.status}
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="flex items-center gap-3">
+          <AvatarMenu shops={shops} current={shopId} onSwitch={switchShop} />
+        </div>
       </header>
       {error && <p className="rounded bg-red-100 p-2 text-sm text-red-700">Backend error: {error}</p>}
 
@@ -110,23 +141,45 @@ export function MerchantPane() {
             data-testid={`tab-${t.id}`}
           >
             {t.label}
-            {t.id === "sessions" && reviews.length > 0 && (
-              <span className="ml-1.5 rounded-full bg-pink-500 px-1.5 text-xs text-white" data-testid="review-badge">{reviews.length}</span>
+            {t.id === "review" && waiting > 0 && (
+              <span className="ml-1.5 rounded-full bg-pink-500 px-1.5 text-xs text-white" data-testid="review-badge">
+                {waiting}
+                <span className="sr-only"> waiting</span>
+              </span>
             )}
           </button>
         ))}
       </nav>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-4 pr-1">
-        {tab === "catalog" && <Catalog products={products} onChange={setProducts} />}
-        {tab === "shop" && shop && <Shop shop={shop} onSaved={setShop} products={products} />}
+        {tab === "catalog" && <Catalog products={products} onChange={setProducts} merchantId={shop?.merchant_id ?? shopId} />}
+        {tab === "shop" && shop && <Shop shop={shop} onSaved={setShop} />}
         {tab === "sessions" && (
           <Sessions sessions={list} versions={versions} products={products} selected={selected} onSelect={setSelected} />
         )}
         {tab === "stats" && <Stats version={statsVersion} />}
 
-        {reviews.length > 0 && (
-          <div className="space-y-3" data-testid="review-dock">
+        {tab === "review" && (
+          <section className="space-y-4" id="review-dock" data-testid="review-dock" aria-labelledby="review-title">
+            <h2 id="review-title" className="text-lg font-bold text-[#071844]">{COPY.review.title}</h2>
+            {waiting === 0 && (
+              <p className="rounded-2xl border border-dashed border-sky-300 bg-white/60 p-6 text-center text-sm text-[#415981]" data-testid="review-empty">
+                {COPY.review.empty}
+              </p>
+            )}
+            {checks.map((s) => (
+              <PriceCheckCard
+                key={`check-${s.session_id}`}
+                sessionId={s.session_id}
+                customer={s.display_name || "A customer"}
+                check={s.price_check!}
+                products={products}
+                onAnswered={() => {
+                  bump(s.session_id);
+                  api.sessions("live").then((live) => setSessions((cur) => ({ ...cur, ...Object.fromEntries(live.map((x) => [x.session_id, x])) }))).catch(() => {});
+                }}
+              />
+            ))}
             {reviews.map((s) => (
               <ReviewCard
                 key={s.session_id}
@@ -140,11 +193,10 @@ export function MerchantPane() {
                 }}
               />
             ))}
-          </div>
+          </section>
         )}
       </div>
-      <p className="sr-only" aria-live="polite">{reviews.length ? `Basket for review ${shortId(reviews[0].session_id)}` : ""}</p>
-      <ShopQR token={shop?.qr_token ?? null} />
+      <p className="sr-only" aria-live="polite">{waiting ? COPY.review.waiting(waiting) : ""}</p>
     </section>
   );
 }

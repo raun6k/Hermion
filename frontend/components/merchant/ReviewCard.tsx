@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { num, rupees, shortId } from "@/lib/format";
+import { num, rupees, STATE_LABEL, when } from "@/lib/format";
 import type { Product, ReviewAction, SessionTrace } from "@/lib/types";
 import { Briefing } from "./Briefing";
 
@@ -30,6 +30,7 @@ export function ReviewCard({
   const [error, setError] = useState<string | null>(null);
   const [edits, setEdits] = useState<EditLine[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const titleId = useId();
 
   useEffect(() => {
     let live = true;
@@ -52,7 +53,7 @@ export function ReviewCard({
     );
   }
 
-  if (!trace) return <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-400">{error ?? "Loading basket…"}</div>;
+  if (!trace) return <div className="rounded-3xl bg-white p-5 text-sm text-slate-400 shadow-sm">{error ?? "Loading basket…"}</div>;
 
   const min = (id: string) => num(products.find((p) => p.product_id === id)?.minimum_price);
   const dirty =
@@ -85,17 +86,43 @@ export function ReviewCard({
 
   const basket = trace.basket;
   const inPerson = state === "in_person";
+  const who = trace.session.display_name || trace.session.customer_name || "A customer";
+  const items = basket?.lines.reduce((n, l) => n + l.qty, 0) ?? 0;
+  const btn = "min-h-11 rounded-full px-5 text-sm font-semibold transition disabled:opacity-50";
   return (
-    <section className="space-y-3 rounded-xl border-2 border-pink-400 bg-pink-50 p-4" data-testid="review-card" data-state={state}>
-      <header className="flex items-baseline justify-between">
-        <h3 className="font-semibold text-slate-900">Basket for review · #{shortId(sessionId)}</h3>
-        <button onClick={() => onOpenTrace(sessionId)} className="text-sm text-sky-700 underline" data-testid="open-trace">View trace</button>
+    <section
+      className="overflow-hidden rounded-3xl bg-white shadow-[0_8px_30px_rgba(8,27,77,0.12)] ring-1 ring-sky-100"
+      data-testid="review-card"
+      data-state={state}
+      aria-labelledby={titleId}
+    >
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-sky-100 bg-gradient-to-r from-pink-50 to-white px-5 py-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-pink-600 text-base font-bold text-white" aria-hidden>{who.slice(0, 1)}</span>
+          <div>
+            <h3 id={titleId} className="text-base font-bold text-[#071844]">{who}&apos;s basket</h3>
+            <p className="text-xs text-[#415981]">
+              {when(trace.session.started_at)} · {items} {items === 1 ? "item" : "items"} ·{" "}
+              <span className="font-semibold text-pink-700">{STATE_LABEL[state ?? ""] ?? state}</span>
+            </p>
+          </div>
+        </div>
+        <button onClick={() => onOpenTrace(sessionId)} className="min-h-10 rounded-full px-3 text-sm font-medium text-sky-800 underline-offset-4 hover:underline" data-testid="open-trace">View conversation</button>
       </header>
 
+      <div className="space-y-4 p-5">
       {basket && (
         <table className="w-full text-sm" data-testid="review-lines">
-          <thead className="text-left text-xs uppercase text-slate-500">
-            <tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Listed</th><th className="text-right">Agreed</th><th className="text-right">Discount</th><th className="text-right">Contribution</th></tr>
+          <caption className="sr-only">Items in {who}&apos;s basket with the listed and agreed prices</caption>
+          <thead className="text-left text-[11px] font-semibold uppercase tracking-wide text-[#5b6f94]">
+            <tr>
+              <th scope="col" className="pb-2">Item</th>
+              <th scope="col" className="pb-2 text-right">Qty</th>
+              <th scope="col" className="pb-2 text-right">Listed</th>
+              <th scope="col" className="pb-2 text-right">Agreed</th>
+              <th scope="col" className="pb-2 text-right">Discount</th>
+              <th scope="col" className="pb-2 text-right">Your profit</th>
+            </tr>
           </thead>
           <tbody>
             {basket.lines.map((l, i) => {
@@ -107,31 +134,34 @@ export function ReviewCard({
               const unitCost = l.qty ? cost / l.qty : 0;
               const below = edit ? agreed < min(l.product_id) * qty : l.below_minimum;
               return (
-                <tr key={l.product_id} className="border-t border-pink-200" data-testid="review-line">
-                  <td className="py-1.5 pr-2">{l.product_name}{below && <span className="ml-1 rounded bg-red-100 px-1.5 text-xs text-red-700" data-testid="below-minimum">below minimum</span>}</td>
+                <tr key={l.product_id} className="border-t border-slate-100" data-testid="review-line">
+                  <th scope="row" className="py-2.5 pr-2 text-left font-medium text-[#071844]">
+                    {l.product_name}
+                    {below && <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700" data-testid="below-minimum">below your lowest price</span>}
+                  </th>
                   <td className="text-right">
                     {edit ? (
-                      <input value={edit.qty} onChange={(e) => setEdits(edits!.map((x, n) => (n === i ? { ...x, qty: e.target.value } : x)))} className="w-12 rounded border px-1 text-right" aria-label={`Quantity ${l.product_id}`} />
+                      <input value={edit.qty} inputMode="numeric" onChange={(e) => setEdits(edits!.map((x, n) => (n === i ? { ...x, qty: e.target.value } : x)))} className="min-h-10 w-14 rounded-lg border border-slate-300 px-2 text-right" aria-label={`Quantity of ${l.product_name}`} />
                     ) : l.qty}
                   </td>
-                  <td className="text-right tabular-nums">{rupees(listed)}</td>
-                  <td className="text-right tabular-nums">
+                  <td className="text-right tabular-nums text-slate-500">{rupees(listed)}</td>
+                  <td className="text-right font-semibold tabular-nums text-[#071844]">
                     {edit ? (
-                      <input value={edit.line_total} onChange={(e) => setEdits(edits!.map((x, n) => (n === i ? { ...x, line_total: e.target.value } : x)))} className={`w-20 rounded border px-1 text-right ${below ? "border-red-400" : ""}`} aria-label={`Agreed ${l.product_id}`} data-testid={`edit-total-${l.product_id}`} />
+                      <input value={edit.line_total} inputMode="numeric" onChange={(e) => setEdits(edits!.map((x, n) => (n === i ? { ...x, line_total: e.target.value } : x)))} className={`min-h-10 w-24 rounded-lg border px-2 text-right ${below ? "border-red-400" : "border-slate-300"}`} aria-label={`Agreed price for ${l.product_name}`} aria-invalid={below || undefined} data-testid={`edit-total-${l.product_id}`} />
                     ) : rupees(agreed)}
                   </td>
-                  <td className="text-right tabular-nums text-slate-600">{listed ? `${(((listed - agreed) / listed) * 100).toFixed(0)}%` : "–"}</td>
-                  <td className="text-right tabular-nums">{rupees(agreed - unitCost * qty)}</td>
+                  <td className="text-right tabular-nums text-slate-500">{listed ? `${(((listed - agreed) / listed) * 100).toFixed(0)}%` : "–"}</td>
+                  <td className="text-right tabular-nums text-emerald-700">{rupees(agreed - unitCost * qty)}</td>
                 </tr>
               );
             })}
           </tbody>
           <tfoot>
-            <tr className="border-t-2 border-pink-300 font-semibold">
-              <td colSpan={3}>Total</td>
-              <td className="text-right tabular-nums" data-testid="review-total">{rupees(edits ? edits.reduce((a, e) => a + num(e.line_total), 0) : basket.total)}</td>
+            <tr className="border-t-2 border-slate-200 text-base font-bold text-[#071844]">
+              <th scope="row" colSpan={3} className="pt-3 text-left">Total</th>
+              <td className="pt-3 text-right tabular-nums" data-testid="review-total">{rupees(edits ? edits.reduce((a, e) => a + num(e.line_total), 0) : basket.total)}</td>
               <td />
-              <td className="text-right tabular-nums">{rupees(basket.contribution)}</td>
+              <td className="pt-3 text-right tabular-nums text-emerald-700">{rupees(basket.contribution)}</td>
             </tr>
           </tfoot>
         </table>
@@ -140,28 +170,29 @@ export function ReviewCard({
       {state === "briefing" && (
         <Briefing sessionId={sessionId} messages={trace.messages} mandate={trace.mandate} products={products} onChanged={onChanged} />
       )}
-      {error && <p className="text-sm text-red-600" role="alert" data-testid="review-error">{error}</p>}
+      {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700" role="alert" data-testid="review-error">{error}</p>}
 
       {(state === "pending_merchant" || inPerson) && (
-        <div className="relative flex flex-wrap items-center gap-2">
-          <button disabled={busy} onClick={() => act("accept")} className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50" data-testid="accept">Accept</button>
-          <button disabled={busy} onClick={() => act("decline")} className="rounded bg-white px-4 py-1.5 text-sm font-medium text-red-700 ring-1 ring-red-300 disabled:opacity-50" data-testid="decline">Decline</button>
+        <div className="relative flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4" role="group" aria-label={`Your decision on ${who}'s basket`}>
+          <button disabled={busy} onClick={() => act("accept")} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} data-testid="accept">Accept</button>
+          <button disabled={busy} onClick={() => act("decline")} className={`${btn} bg-white text-red-700 ring-1 ring-red-300 hover:bg-red-50`} data-testid="decline">Decline</button>
           {state === "pending_merchant" && (
-            <div className="relative">
-              <button disabled={busy} onClick={() => setMenu((m) => !m)} className="rounded bg-white px-4 py-1.5 text-sm font-medium text-slate-800 ring-1 ring-slate-300" aria-expanded={menu} data-testid="renegotiate">Renegotiate ▾</button>
+            <div className="relative" onKeyDown={(e) => e.key === "Escape" && setMenu(false)}>
+              <button disabled={busy} onClick={() => setMenu((m) => !m)} className={`${btn} bg-white text-[#071844] ring-1 ring-slate-300 hover:bg-slate-50`} aria-expanded={menu} aria-haspopup="true" data-testid="renegotiate">Renegotiate ▾</button>
               {menu && (
-                <ul className="absolute left-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm shadow-lg">
-                  <li><button className="w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => act("renegotiate_hermion")} data-testid="brief-hermion">Brief Hermion</button></li>
-                  <li><button className="w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => act("renegotiate_in_person")} data-testid="in-person">In person</button></li>
+                <ul className="absolute left-0 top-full z-10 mt-1 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white text-sm shadow-lg">
+                  <li><button autoFocus className="min-h-11 w-full px-4 text-left hover:bg-slate-50" onClick={() => act("renegotiate_hermion")} data-testid="brief-hermion">Tell Hermion what to offer</button></li>
+                  <li><button className="min-h-11 w-full px-4 text-left hover:bg-slate-50" onClick={() => act("renegotiate_in_person")} data-testid="in-person">Talk to them in person</button></li>
                 </ul>
               )}
             </div>
           )}
           {inPerson && dirty && (
-            <button disabled={busy} onClick={() => saveEdits().catch((e: Error) => setError(e.message))} className="rounded bg-sky-700 px-3 py-1.5 text-sm text-white" data-testid="save-edits">Save changes</button>
+            <button disabled={busy} onClick={() => saveEdits().catch((e: Error) => setError(e.message))} className={`${btn} bg-sky-700 text-white`} data-testid="save-edits">Save changes</button>
           )}
         </div>
       )}
+      </div>
     </section>
   );
 }

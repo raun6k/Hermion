@@ -1,6 +1,7 @@
 """Loads engine inputs from the DB, calls the pure engine, writes the `offers` log."""
 
 import uuid
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
@@ -8,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Goal, GoalType, Merchant, Offer, Product, Session, SessionState
+from app.engine.behavior import Profile, guidance
 from app.engine.bundle import suggest_bundle as engine_suggest_bundle
 from app.engine.concession import evaluate_offer
 from app.engine.types import (
@@ -19,7 +21,7 @@ from app.engine.types import (
     OfferScope,
 )
 from app.schemas.events import CaptionEvent
-from app.services import catalog, sessions, trace, views
+from app.services import behavior, catalog, consent, sessions, trace, views
 from app.services.hub import Hubs
 
 # The agent only offers tools from discovery on; the service tolerates `intro` so a first offer still works.
@@ -65,7 +67,7 @@ async def build_context(
                 LinePrice(p["product_id"], p["qty"], Decimal(p["line_total"])) for p in offer.line_prices
             )
 
-    all_products = [p for p in await catalog.list_products(db)]
+    all_products = [p for p in await catalog.list_products(db, session.merchant_id)]
     clear: set[str] = set()
     preserve: set[str] = set()
     for goal in await db.scalars(select(Goal).where(Goal.merchant_id == session.merchant_id)):
@@ -84,8 +86,12 @@ async def build_context(
         clear_stock=frozenset(clear),
         preserve_stock=frozenset(preserve),
         mandate_rules=mandate_rules(mandate.rules) if mandate else (),
-        bundle_allowed=bool(merchant and merchant.bundle_allowed),
+        # Multi-item quotes are always available to customers; this is not a shop setting.
+        bundle_allowed=True,
         last_counter=previous,
+        escalation_mode=merchant.escalation if merchant else "serious",
+        escalation_gap_pct=merchant.escalation_gap_pct if merchant else 5,
+        escalations_used=session.escalations,
     )
 
 
@@ -105,6 +111,16 @@ def public_result(offer: Offer) -> dict[str, Any]:
         "round": offer.round,
         "final": offer.final,
     }
+    if offer.headroom:
+        out["headroom"] = offer.headroom  # coarse bucket only: never the floor or target
+    if offer.profile:
+        out["customer_read"] = offer.profile
+        out["guidance"] = guidance(Profile(offer.profile), bool(offer.signals.get("walk_away")))
+    if offer.signals.get("escalation_eligible"):
+        out["shopkeeper_check_possible"] = True
+    if offer.signals.get("acceptable"):
+        # Hermion held out for more on an offer it could have taken; it may still close at the offer.
+        out["customer_offer_acceptable"] = True
     if offer.price is not None:
         out["price"] = rupees(offer.price)
         out["line_prices"] = [
@@ -129,6 +145,7 @@ async def _store(
     *,
     buy_now: bool = False,
     bundle: bool = False,
+    profile: Profile | None = None,
 ) -> Offer:
     mandate = await views.active_mandate(db, session.session_id) if ev.mandate_applied else None
     offer = Offer(
@@ -136,7 +153,14 @@ async def _store(
         items=[{"product_id": i.product_id, "qty": i.qty} for i in items],
         offered_amount=offered,
         offer_scope=scope,
-        signals={"active": list(ev.signals), "buy_now": buy_now, "bundle": bundle},
+        signals={
+            "active": list(ev.signals),
+            "buy_now": buy_now,
+            "bundle": bundle,
+            "escalation_eligible": ev.escalation_eligible,
+            "acceptable": ev.acceptable,
+            "walk_away": profile is Profile.browsing,
+        },
         decision=ev.decision.value,
         price=ev.price,
         line_prices=_line_prices_json(ev),
@@ -144,6 +168,8 @@ async def _store(
         round=ev.round,
         final=ev.final,
         threshold=ev.threshold,
+        headroom=ev.headroom,
+        profile=profile.value if profile else None,
         mandate_id=mandate.id if mandate else None,
     )
     db.add(offer)
@@ -189,16 +215,31 @@ async def evaluate(
     offered_amount: Decimal,
     offer_scope: OfferScope,
     buy_now: bool,
+    proposed_price: Decimal | None = None,
 ) -> dict[str, Any]:
     session = await _negotiable_session(db, hubs, session_id)
     products = await catalog.product_terms(db, [i.product_id for i in items])
     ctx = await build_context(db, session, items)
-    ev = evaluate_offer(products, items, offered_amount, offer_scope, buy_now, ctx)
-    offer = await _store(db, hubs, session, items, offered_amount, offer_scope.value, ev, buy_now=buy_now)
+    total = offered_amount * items[0].qty if offer_scope is OfferScope.per_unit else offered_amount
+    read = await behavior.read_customer(db, session_id, items, total, buy_now) if items else None
+    ctx = replace(ctx, customer_serious=read is not Profile.lowballer)
+    ev = evaluate_offer(products, items, offered_amount, offer_scope, buy_now, ctx, proposed_price)
+    profile = read if ev.round > 0 else None
+    offer = await _store(
+        db, hubs, session, items, offered_amount, offer_scope.value, ev, buy_now=buy_now, profile=profile
+    )
+    stage = None
+    if offer.decision == "accept":
+        stage = await consent.open_consent(db, session, offer.id, buy_now)
+    else:
+        await consent.clear(db, session)
     if ev.round > 0:  # a real negotiation round: first one moves discovery on
         await sessions.ensure_negotiating(db, hubs, session)
         await _captions(db, hubs, session_id, items, offer, offered_amount)
-    return public_result(offer)
+    result = public_result(offer)
+    if stage == "granted":
+        result["add_allowed"] = True  # customer explicitly said "take it": add_to_basket may follow now
+    return result
 
 
 async def suggest_bundle(
@@ -212,6 +253,7 @@ async def suggest_bundle(
     if ev is None or ev.price is None:
         return None
     offer = await _store(db, hubs, session, items, ev.price, OfferScope.basket.value, ev, bundle=True)
+    await consent.open_consent(db, session, offer.id)
     await sessions.ensure_negotiating(db, hubs, session)
     await _captions(db, hubs, session_id, items, offer, None)
     return {

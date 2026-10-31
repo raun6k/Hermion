@@ -1,0 +1,9 @@
+{
+  "merchant_id": "M003",
+  "shop_name": "Charminar Furniture",
+  "shop_description": "Charminar Furniture in Rajajinagar, Bengaluru has catalogued furniture for living, dining, work, and bedroom spaces, including chairs, tables, sofas, beds, mattresses, and storage pieces. Customers can compare the sizes, materials, finishes, and features listed for each item to find a suitable fit for their space.",
+  "negotiation_instructions": "Ask where the item will be used and which listed dimensions, materials, finish, comfort, or storage features matter. Explain construction and product details only when they are in the catalog. Make patient, stepwise counters using engine prices, and consider a relevant listed pair or multi-item quote when it fits the customer's request. Never promise delivery, assembly, warranty, or details the catalog does not support. Ask you to step in when the offer is within the selected close range.",
+  "qr_token": "hermion-m003-demo",
+  "escalation": "when_close",
+  "escalation_gap_pct": 10
+}

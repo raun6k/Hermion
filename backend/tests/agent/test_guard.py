@@ -4,7 +4,14 @@ from decimal import Decimal as D
 
 import pytest
 
-from app.agent.guard import UNPARSEABLE, GuardFacts, allowed_amounts, check_reply, extract_amounts
+from app.agent.guard import (
+    UNPARSEABLE,
+    GuardFacts,
+    allowed_amounts,
+    check_reply,
+    extract_amounts,
+    spec_mentions,
+)
 
 
 @pytest.mark.parametrize(
@@ -69,6 +76,18 @@ def test_check_reply_flags_only_unapproved_amounts() -> None:
     assert check_reply("eight hundred rupees", allowed) == [D(800)]
     assert check_reply("நூறு", allowed) == [UNPARSEABLE]  # unreadable amount fails closed
     assert check_reply("Sure, let me check.", allowed) == []
+
+
+def test_listed_product_measurements_are_facts_not_prices() -> None:
+    specs = spec_mentions(["Nova 5G phone, 256 GB", "5000 mAh battery", "Mixer grinder 500 W"])
+    allowed = {D(18999)}
+    assert check_reply("It has a 5000 mAh battery and 256 GB storage, for 18999.", allowed, specs) == []
+    assert check_reply("The 500 W motor handles idli batter.", allowed, specs) == []
+    # Same number as a price, or a measurement the merchant never wrote, still fails.
+    assert check_reply("I can do ₹5000 mAh", allowed, specs) == [D(5000)]
+    assert check_reply("It is yours for 5000 rupees.", allowed, specs) == [D(5000)]
+    assert check_reply("It has a 6000 mAh battery.", allowed, specs) == [D(6000)]
+    assert check_reply("5000 mAh battery", allowed) == [D(5000)]  # no facts given: unchanged
 
 
 def test_allowed_amounts_from_engine_facts() -> None:

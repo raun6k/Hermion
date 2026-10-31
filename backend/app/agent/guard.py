@@ -116,6 +116,21 @@ _MULTIPLIERS = {k: v for k, (kind, v) in _WORDS.items() if kind in "tlc"}
 _TOKEN_SPLIT = re.compile(r"[\s,;:!?()\[\]\"'“”‘’।॥/]+")
 _NUMBER = re.compile(r"(?<![\w.,])(\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)")
 
+# A measurement such as "5000 mAh" or "256 GB" is a product fact, not a price. It is exempt only when the
+# same number and unit appear in the merchant's facts for a product (see `spec_mentions`) and no rupee
+# marker precedes it, so "₹5000" stays an amount.
+_SPEC_UNITS = (
+    "mah", "gb", "tb", "mb", "w", "watt", "watts", "kw", "v", "volt", "volts", "hz", "mm", "cm", "inch",
+    "inches", "ft", "feet", "kg", "g", "gm", "gsm", "l", "litre", "litres", "liter", "liters", "ml", "rpm",
+    "mp", "cc", "tc", "thread", "threads", "nits", "dpi",
+)  # fmt: skip
+_SPEC_MENTION = re.compile(
+    r"(?<![\w.,])(\d[\d,]*(?:\.\d+)?)\s*("
+    + "|".join(sorted(_SPEC_UNITS, key=len, reverse=True))
+    + r")(?!\w)",
+    re.IGNORECASE,
+)
+
 
 def _ascii_digits(text: str) -> str:
     """Map every Unicode decimal digit (Devanagari, Telugu, ...) to ASCII."""
@@ -208,8 +223,38 @@ def extract_amounts(text: str) -> list[Decimal]:
     return _digit_amounts(text) + _word_amounts(_DIGITS_WITH_MAGNITUDE.sub(" ", text))
 
 
-def check_reply(text: str, allowed: set[Decimal]) -> list[Decimal]:
+def _spec_key(number: str, unit: str) -> tuple[Decimal, str] | None:
+    try:
+        return Decimal(number.replace(",", "")), unit.lower()
+    except InvalidOperation:
+        return None
+
+
+def spec_mentions(texts: Iterable[str]) -> frozenset[tuple[Decimal, str]]:
+    """(number, unit) pairs written in product facts: names, pitch, selling points, specs."""
+    out = set()
+    for text in texts:
+        for m in _SPEC_MENTION.finditer(_ascii_digits(text)):
+            if key := _spec_key(m.group(1), m.group(2)):
+                out.add(key)
+    return frozenset(out)
+
+
+def _drop_spec_mentions(text: str, specs: frozenset[tuple[Decimal, str]]) -> str:
+    def keep_or_drop(m: re.Match[str]) -> str:
+        if _has_marker_before(text, m.start()) or _spec_key(m.group(1), m.group(2)) not in specs:
+            return m.group(0)
+        return " "
+
+    return _SPEC_MENTION.sub(keep_or_drop, text)
+
+
+def check_reply(
+    text: str, allowed: set[Decimal], specs: frozenset[tuple[Decimal, str]] = frozenset()
+) -> list[Decimal]:
     """Return the amounts in `text` that are not allowed (empty list = pass)."""
+    if specs:
+        text = _drop_spec_mentions(_ascii_digits(text), specs)
     return [a for a in extract_amounts(text) if a not in allowed]
 
 
@@ -244,3 +289,31 @@ def allowed_amounts(facts: GuardFacts) -> set[Decimal]:
         allowed.add(facts.basket_total)
     allowed.update(facts.customer_amounts)
     return allowed
+
+
+# ---- private shop data ------------------------------------------------------------
+
+_WORD = re.compile(r"\w+", re.UNICODE)
+_SHINGLE = 4  # words in a row copied from the shopkeeper's notes
+_INTERNAL_TALK = re.compile(
+    r"in the shop for a while|\b(?:old|slow[- ]moving|dead|excess|surplus|unsold)\s+stock\b"
+    r"|\b(?:clear(?:ing)?|get rid of|offload)\b.{0,24}\b(?:stock|inventory|kurtas?)\b"
+    r"|\bshop ?keeper(?:'s|’s)?\s+(?:instructions?|preferences?|notes?|goals?|mandate|rules)\b"
+    r"|\b(?:my|the|these)\s+(?:instructions|guidelines|system prompt|private notes)\b"
+    r"|\bsystem prompt\b|\b(?:minimum|target|cost)\s+price\b|\bunit cost\b|\bprofit margins?\b"
+    r"|\b(?:shop ?keeper|owner|merchant)\s+(?:wants|needs|asked|told|instructed|prefers)\s+(?:me|to|us)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _shingles(text: str) -> set[tuple[str, ...]]:
+    words = [w.lower() for w in _WORD.findall(text)]
+    return {tuple(words[i : i + _SHINGLE]) for i in range(len(words) - _SHINGLE + 1)}
+
+
+def leaks_private(reply: str, secrets: Iterable[str]) -> bool:
+    """True when a reply repeats the shopkeeper's private notes or talks about the shop's internals."""
+    if _INTERNAL_TALK.search(reply):
+        return True
+    copied = _shingles(reply)
+    return any(copied & _shingles(secret) for secret in secrets)

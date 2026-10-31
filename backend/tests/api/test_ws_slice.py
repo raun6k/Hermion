@@ -35,8 +35,7 @@ def test_customer_text_round_trip(client: TestClient) -> None:
             assert customer.receive_json() == {"type": "state", "state": "intro", "message": None}
             assert customer.receive_json() == {"type": "agent_state", "state": "idle"}
 
-            customer.send_json({"type": "select_language", "code": "en-IN"})
-            assert customer.receive_json()["type"] == "language_selected"
+            customer.send_json({"type": "ui_language", "code": "en-IN"})
             assert customer.receive_json()["state"] == "thinking"
             assert customer.receive_json()["state"] == "discovery"
             assert customer.receive_json()["speaker"] == "hermion"
@@ -55,11 +54,19 @@ def test_customer_text_round_trip(client: TestClient) -> None:
             customer.send_json({"type": "bogus"})
             assert customer.receive_json()["code"] == "INVALID_EVENT"
 
-        merchant_events = [merchant.receive_json() for _ in range(4)]
-        assert merchant_events[1]["type"] == "session_state"
-        traces = [merchant_events[0], merchant_events[2], merchant_events[3]]
-        assert [t["data"]["speaker"] for t in traces] == ["hermion", "customer", "hermion"]
-        assert all(t["type"] == "trace" and t["session_id"] == sid for t in traces)
+        messages = {}
+        timing = None
+        while len(messages) < 3 or timing is None:
+            event = merchant.receive_json()
+            if event.get("type") == "trace" and event.get("kind") == "message":
+                messages[event["data"]["id"]] = event["data"]
+            elif event.get("type") == "trace" and event.get("kind") == "timing":
+                timing = event["data"]
+        assert [m["speaker"] for m in messages.values()] == ["hermion", "customer", "hermion"]
+        assert timing["measurements"]["input"] == "text"
+        assert timing["measurements"]["speech_end_to_first_audio_ms"] is None
+        trace = client.get(f"/merchant/sessions/{sid}").json()
+        assert trace["turn_timings"][0]["id"] == timing["id"]
 
     assert [s for s, _ in asyncio.run(_messages(sid))] == ["hermion", "customer", "hermion"]
 
@@ -76,22 +83,20 @@ def test_unknown_session_socket_is_refused(client: TestClient) -> None:
     assert exc.value.code == 4404
 
 
-def test_language_selection_starts_one_greeting_and_survives_reconnect(client: TestClient) -> None:
+def test_ui_language_starts_one_greeting_and_survives_reconnect(client: TestClient) -> None:
     sid = client.post(
         "/sessions", json={"qr_token": "hermion-m001-demo", "device_id": str(uuid.uuid4())}
     ).json()["session_id"]
     with client.websocket_connect(f"/ws/sessions/{sid}") as ws:
         ws.receive_json()
         ws.receive_json()
-        ws.send_json({"type": "select_language", "code": "en-IN"})
-        assert ws.receive_json() == {"type": "language_selected", "code": "en-IN"}
+        ws.send_json({"type": "ui_language", "code": "en-IN"})
         assert ws.receive_json() == {"type": "agent_state", "state": "thinking"}
         assert ws.receive_json()["state"] == "discovery"
         greeting = ws.receive_json()
         assert greeting["type"] == "transcript" and greeting["speaker"] == "hermion"
         assert ws.receive_json() == {"type": "agent_state", "state": "idle"}
-        ws.send_json({"type": "select_language", "code": "en-IN"})
-        assert ws.receive_json() == {"type": "language_selected", "code": "en-IN"}
+        ws.send_json({"type": "ui_language", "code": "en-IN"})  # no second greeting
     with client.websocket_connect(f"/ws/sessions/{sid}") as ws:
         assert ws.receive_json()["state"] == "discovery"
         assert ws.receive_json()["type"] == "agent_state"
@@ -100,17 +105,13 @@ def test_language_selection_starts_one_greeting_and_survives_reconnect(client: T
     assert [speaker for speaker, _ in asyncio.run(_messages(sid))] == ["hermion"]
 
 
-def test_greeting_requires_an_enabled_language(client: TestClient) -> None:
+def test_ui_language_must_be_a_shop_language(client: TestClient) -> None:
     sid = client.post(
         "/sessions", json={"qr_token": "hermion-m001-demo", "device_id": str(uuid.uuid4())}
     ).json()["session_id"]
     with client.websocket_connect(f"/ws/sessions/{sid}") as ws:
         ws.receive_json()
         ws.receive_json()
-        ws.send_json({"type": "text_input", "text": "Hello"})
-        assert ws.receive_json()["code"] == "LANGUAGE_REQUIRED"
-        ws.send_json({"type": "select_language", "code": "fr-FR"})
+        ws.send_json({"type": "ui_language", "code": "fr-FR"})
         assert ws.receive_json()["code"] == "UNSUPPORTED_LANGUAGE"
-    session = client.get(f"/sessions/{sid}").json()
-    assert session["state"] == "intro" and session["language"] is None
     assert asyncio.run(_messages(sid)) == []

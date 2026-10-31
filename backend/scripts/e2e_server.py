@@ -10,16 +10,30 @@ class DemoLLM(FakeLLMClient):
     async def complete(self, messages, tools=None):
         tool_names = {item["function"]["name"] for item in tools or []}
         last_user = next((str(m.get("content", "")) for m in reversed(messages) if m["role"] == "user"), "")
+        system = " ".join(str(m.get("content", "")) for m in messages if m["role"] == "system")
+        if messages[-1]["role"] != "tool" and "add_to_basket" in tool_names:
+            # Server-side consent (services/consent.py): the state block says which step we are on.
+            granted = re.search(
+                r"Basket consent: the customer has confirmed.*?evaluation_id=([0-9a-f-]{36})", system
+            )
+            if granted:
+                return LLMResponse(
+                    None, [ToolCall("add", "add_to_basket", {"evaluation_id": granted.group(1)})]
+                )
+            if "Basket consent: the customer said yes once" in system:
+                return LLMResponse("Just to confirm: shall I add it to your basket?")
         if messages[-1]["role"] == "tool":
             result = json.loads(messages[-1]["content"])
             preceding = messages[-2]["tool_calls"][0]["function"]["name"]
-            if (
-                preceding == "suggest_bundle"
-                or (preceding == "evaluate_offer" and result.get("decision") == "accept")
-            ) and "add_to_basket" in tool_names:
+            if result.get("add_allowed") and "add_to_basket" in tool_names:
                 return LLMResponse(
                     None, [ToolCall("add", "add_to_basket", {"evaluation_id": result["evaluation_id"]})]
                 )
+            if preceding == "suggest_bundle" or (
+                preceding == "evaluate_offer" and result.get("decision") == "accept"
+            ):
+                agreed = result.get("price") or result.get("bundle_price")
+                return LLMResponse(f"₹{agreed} is agreed. Shall I add it to your basket?")
             if preceding == "evaluate_offer" and result.get("price"):
                 return LLMResponse(f"The price is ₹{result['price']}.")
             if preceding == "propose_mandate":

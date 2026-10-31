@@ -4,6 +4,10 @@
 // Singleton is created lazily: nothing here may run at module load (Cache Components prerender).
 import { ApiError } from "@/lib/errors";
 import type {
+  VisitPublic,
+  PriceCheckAction,
+  ProductPublic,
+  MerchantChoice,
   BasketEdit,
   BriefingResponse,
   CustomerOutbound,
@@ -18,6 +22,7 @@ import type {
   ProductPatch,
   ReviewAction,
   SessionPublic,
+  ShopPublic,
   SessionState,
   SessionSummary,
   SessionTrace,
@@ -45,6 +50,9 @@ interface Line {
 
 interface MockSession {
   id: string;
+  device: string;
+  qrToken: string;
+  customer_name?: string | null;
   state: SessionState;
   language: string | null;
   started_at: string;
@@ -77,6 +85,10 @@ const T = {
   pair: (p: number): Say => [`శుభవార్త! షర్ట్ + బెల్ట్ రెండూ కలిపి ${fmt(p)} కి ఇస్తాను. సరేనా?`, `अच्छी ख़बर! शर्ट + बेल्ट दोनों मिलाकर ${fmt(p)} में दूँगा। ठीक है?`],
   pairDone: ["అద్భుతం! రెండూ బాస్కెట్‌లో ఉన్నాయి. పంపించండి.", "बढ़िया! दोनों टोकरी में हैं। भेज दीजिए।"] as Say,
   reviewing: ["షాపు మీ బాస్కెట్‌ను పరిశీలిస్తోంది…", "दुकान आपकी टोकरी देख रही है…"] as Say,
+  welcomeBack: (total: number): Say => [
+    `మళ్లీ స్వాగతం! మీ బాస్కెట్ ${fmt(total)}, ఇంకా మీ దగ్గరే ఉంది. నేను ఎలా సహాయం చేయగలను?`,
+    `फिर से स्वागत है! ${fmt(total)} की टोकरी अभी आपके पास है। मैं कैसे मदद करूँ?`,
+  ],
   nope: ["సరే, ఇంకా ఏమైనా కావాలా?", "ठीक है, और कुछ चाहिए?"] as Say,
 };
 
@@ -96,7 +108,6 @@ export class MockBackend {
   sessions = new Map<string, MockSession>();
   private customerSubs = new Map<string, Set<Listener<CustomerOutbound>>>();
   private merchantSubs = new Set<Listener<MerchantOutbound>>();
-  private deviceSessions = new Map<string, string>();
 
   // ---- plumbing ---------------------------------------------------------------------
   private now(): string {
@@ -140,6 +151,8 @@ export class MockBackend {
       ended_at: s.ended_at,
       line_count: s.basket.length,
       basket_total: s.basket.length ? money(s.basket.reduce((a, l) => a + l.line_total, 0)) : null,
+      customer_name: s.customer_name ?? null,
+      display_name: s.customer_name || `Guest ${[...this.sessions.values()].filter((x) => !x.customer_name).indexOf(s) + 1}`,
     };
   }
   private setState(s: MockSession, to: SessionState) {
@@ -153,14 +166,15 @@ export class MockBackend {
   }
 
   // ---- customer REST ----------------------------------------------------------------
-  createSession(qrToken: string, deviceId: string): { session_id: string } {
-    if (qrToken !== this.merchant.qr_token) throw new ApiError(404, "UNKNOWN_QR", "This QR code does not belong to a Hermion shop");
-    const live = this.deviceSessions.get(deviceId);
-    if (live && !TERMINAL.includes(this.sessions.get(live)!.state))
-      throw new ApiError(409, "SESSION_ACTIVE", "Exit your current session to scan again");
+  createSession(qrToken: string, deviceId: string, customerName?: string | null): { session_id: string } {
+    if (!this.listMerchants().some((m) => m.qr_token === qrToken)) throw new ApiError(404, "UNKNOWN_QR", "This QR code does not belong to a Hermion shop");
+    const live = [...this.sessions.values()].find((s) => s.device === deviceId && s.qrToken === qrToken && !TERMINAL.includes(s.state));
+    if (live) return { session_id: live.id };
     const id = crypto.randomUUID();
     const s: MockSession = {
       id,
+      device: deviceId,
+      qrToken,
       state: "intro",
       language: null,
       started_at: this.now(),
@@ -174,11 +188,16 @@ export class MockBackend {
       pendingBundle: null,
       lastCounter: {},
       transcripts: [],
+      customer_name: customerName?.trim() || null,
     };
     this.sessions.set(id, s);
-    this.deviceSessions.set(deviceId, id);
     this.toMerchant({ type: "session_created", session: this.summary(s) });
     return { session_id: id };
+  }
+
+  publicShop(qrToken?: string): ShopPublic {
+    const shop = this.listMerchants().find((m) => m.qr_token === qrToken);
+    return { shop_name: shop?.shop_name ?? this.merchant.shop_name, languages: [...this.merchant.languages] };
   }
 
   publicSession(id: string): SessionPublic {
@@ -196,6 +215,25 @@ export class MockBackend {
     return { state: s.state, basket: this.publicBasket(s) };
   }
 
+  visits(qrToken: string, deviceId: string): VisitPublic[] {
+    return [...this.sessions.values()]
+      .filter((s) => s.device === deviceId && s.qrToken === qrToken)
+      .reverse()
+      .slice(0, 5)
+      .map((s) => ({ session_id: s.id, state: s.state, started_at: s.started_at, basket: s.basket.length ? this.publicBasket(s) : null }));
+  }
+
+  /** Talk to Hermion again: a basket waiting for the shop comes back to the customer (same as the backend). */
+  rejoin(id: string): { state: SessionState } {
+    const s = this.session(id);
+    if (s.state === "pending_merchant") {
+      this.setState(s, "negotiating");
+      const total = s.basket.reduce((a, l) => a + l.line_total, 0);
+      void this.say(s, T.welcomeBack(total), { amount: total });
+    } else if (!["intro", "discovery", "negotiating"].includes(s.state)) this.wrongState(s, "pending_merchant");
+    return { state: s.state };
+  }
+
   exit(id: string): { state: SessionState } {
     const s = this.session(id);
     if (!TERMINAL.includes(s.state)) this.setState(s, "exited");
@@ -209,6 +247,7 @@ export class MockBackend {
       product_name: this.product(l.product_id).product_name,
       qty: l.qty,
       line_total: money(l.line_total),
+      listed_total: money(num(this.product(l.product_id).listed_price) * l.qty),
     }));
     return { lines, total: money(s.basket.reduce((a, l) => a + l.line_total, 0)) };
   }
@@ -353,15 +392,11 @@ export class MockBackend {
     s.transcripts.slice(-20).forEach((t) => onEvent({ type: "transcript", speaker: t.speaker, text: t.text, final: true }));
     return {
       send: (e) => {
-        if (e.type === "select_language") {
+        if (e.type === "ui_language") {
           if (!this.merchant.languages.includes(e.code)) {
             this.toCustomer(id, { type: "error", code: "UNSUPPORTED_LANGUAGE", message: "Language is not available in this shop" });
-          } else if (s.state !== "intro") {
-            if (s.language === e.code) this.toCustomer(id, { type: "language_selected", code: e.code });
-            else this.toCustomer(id, { type: "error", code: "WRONG_STATE", message: "Language selection is already complete" });
-          } else {
+          } else if (s.state === "intro") {
             s.language = e.code;
-            this.toCustomer(id, { type: "language_selected", code: e.code });
             this.toCustomer(id, { type: "agent_state", state: "thinking" });
             this.later(500, () => {
               if (s.state !== "intro") return;
@@ -371,8 +406,8 @@ export class MockBackend {
             });
           }
         } else if (e.type === "text_input") {
-          if (s.state === "intro") this.toCustomer(id, { type: "error", code: "LANGUAGE_REQUIRED", message: "Choose a language before starting" });
-          else this.customerText(s, e.text);
+          if (s.state === "intro") this.setState(s, "discovery");
+          this.customerText(s, e.text);
         }
       },
       close: off,
@@ -435,6 +470,48 @@ export class MockBackend {
   }
 
   // ---- merchant REST ----------------------------------------------------------------
+  shopProducts(): ProductPublic[] {
+    // Mirrors the backend: one per product name, a different category first, at most six.
+    const unique: Product[] = [];
+    for (const p of this.products)
+      if (p.available_stock > 0 && (p.pitch || p.selling_points?.length) && !unique.some((u) => u.product_name === p.product_name)) unique.push(p);
+    const seen = new Set<string>();
+    const varied = unique.filter((p) => !seen.has(p.category) && seen.add(p.category));
+    return [...varied, ...unique.filter((p) => !varied.includes(p))]
+      .slice(0, 6)
+      .map((p) => ({
+        product_id: p.product_id,
+        product_name: p.product_name,
+        category: p.category,
+        attributes: p.attributes,
+        listed_price: p.listed_price,
+        stock_band: p.available_stock <= 3 ? "low" : "in",
+        negotiable: p.negotiable,
+        pitch: p.pitch ?? null,
+        selling_points: p.selling_points ?? [],
+        specs: p.specs ?? {},
+        best_for: p.best_for ?? [],
+      }));
+  }
+  removeFromBasket(id: string, productId: string): BasketPublic {
+    const s = this.session(id);
+    s.basket = s.basket.filter((l) => l.product_id !== productId);
+    this.pushBasket(s, "remove");
+    return this.publicBasket(s);
+  }
+  answerPriceCheck(id: string, action: PriceCheckAction, price?: string): { state: SessionState } {
+    const s = this.session(id);
+    void action;
+    void price;
+    return { state: s.state };
+  }
+  listMerchants(): MerchantChoice[] {
+    return [
+      { merchant_id: "M001", shop_name: this.merchant.shop_name, shop_description: this.merchant.shop_description, qr_token: this.merchant.qr_token },
+      { merchant_id: "M002", shop_name: "Ameerpet Electronics", shop_description: "Phones, audio, accessories, and small appliances on SP Road, Bengaluru", qr_token: "hermion-m002-demo" },
+      { merchant_id: "M003", shop_name: "Charminar Furniture", shop_description: "Furniture for living, dining, work, and bedrooms in Rajajinagar, Bengaluru", qr_token: "hermion-m003-demo" },
+    ];
+  }
   health(): Health {
     return { status: "ok", checks: { db: { status: "fake", detail: "mock" }, openrouter: { status: "fake", detail: "mock" }, sarvam: { status: "fake", detail: "mock" } } };
   }
@@ -505,6 +582,7 @@ export class MockBackend {
       offers: s.offers.map((o) => ({ ...o })),
       tool_calls: [],
       state_changes: [],
+      turn_timings: [],
       basket: s.basket.length ? this.merchantBasket(s) : null,
       mandate: s.mandate,
     };
@@ -605,15 +683,56 @@ export class MockBackend {
         agreed += l.line_total;
         contribution += l.line_total - num(p.unit_cost) * l.qty;
       }
+    // Fixed sample history (41 deals, 61 customers) plus whatever happened in this mock session.
+    listed += 52800;
+    agreed += 47500;
+    contribution += 9900;
+    const n = this.sessions.size;
+    const live = [...this.sessions.values()];
     return {
-      sessions: this.sessions.size,
-      offers: [...this.sessions.values()].reduce((a, s) => a + s.offers.length, 0),
-      deals: deals.length,
-      avg_discount_pct: money(listed ? ((listed - agreed) / listed) * 100 : 0),
+      sessions: 61 + n,
+      offers: 188 + live.reduce((a, s) => a + s.offers.length, 0),
+      deals: 41 + deals.length,
+      avg_discount_pct: money(((listed - agreed) / listed) * 100),
       total_contribution: money(contribution),
+      revenue_won: money(agreed),
+      discount_given: money(listed - agreed),
+      funnel: { scanned: 61 + n, started: 58 + n, offered: 52 + live.filter((s) => s.offers.length).length, in_basket: 47 + live.filter((s) => s.basket.length).length, confirmed: 44 + deals.length, accepted: 41 + deals.length },
+      // Live mock sessions on top of a fixed sample history, so Insights reads like a shop in use.
+      per_day: SAMPLE.per_day,
+      top_products: SAMPLE.top_products,
+      language_mix: SAMPLE.language_mix,
+      upsell_attach_rate: "0.27",
+      abandoned_baskets: 3,
+      escalation_rate: "0.12",
+      total_negotiation_seconds: 214,
+      avg_response_ms: 1850,
+      outcomes: [
+        { name: "accepted", value: 41 + deals.length },
+        { name: "declined", value: 6 },
+        { name: "exited", value: 14 },
+        { name: "open", value: [...this.sessions.values()].filter((s) => !["accepted", "declined", "exited"].includes(s.state)).length },
+      ],
+      per_hour_utc: SAMPLE.per_hour_utc,
     };
   }
 }
+
+const SAMPLE: Pick<Required<Stats>, "per_day" | "top_products" | "language_mix" | "per_hour_utc"> = {
+  per_day: Array.from({ length: 14 }, (_, i) => {
+    const deals = [2, 3, 1, 4, 3, 5, 2, 3, 4, 6, 3, 4, 5, 4][i];
+    return { day: `2026-10-${String(18 + i).padStart(2, "0")}`, deals, revenue: money(deals * 1150 + (i % 3) * 400) };
+  }),
+  top_products: [
+    { product_id: "SHIRT-BLU-M", product_name: "Men's cotton shirt, blue", units: 23, revenue: money(19400) },
+    { product_id: "KURTA-MRN-M", product_name: "Men's cotton kurta, maroon", units: 9, revenue: money(11250) },
+    { product_id: "SAREE-SLK-RED", product_name: "Silk saree, red", units: 2, revenue: money(11000) },
+    { product_id: "BELT-BRN-32", product_name: "Leather belt, brown", units: 15, revenue: money(5850) },
+  ],
+  language_mix: [{ name: "Telugu", value: 26 }, { name: "Hindi", value: 18 }, { name: "English", value: 11 }, { name: "Tamil", value: 6 }],
+  // UTC hours: an Indian evening rush (13-15 UTC = 6:30-8:30 PM IST).
+  per_hour_utc: [[4, 2], [5, 4], [6, 5], [7, 3], [8, 4], [9, 6], [10, 5], [11, 7], [12, 9], [13, 12], [14, 11], [15, 7], [16, 3]].map(([h, v]) => ({ name: String(h), value: v })),
+};
 
 let instance: MockBackend | null = null;
 export function mockBackend(): MockBackend {

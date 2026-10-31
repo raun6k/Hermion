@@ -16,28 +16,34 @@ from app.db.models import SessionState
 from app.engine.types import OfferItem, OfferScope, ReasonCode
 from app.schemas.common import AppError
 from app.schemas.public import BasketPublic
-from app.services import basket, catalog, mandates, offers, sessions
+from app.services import basket, catalog, consent, mandates, offers, price_checks, sessions
 from app.services.hub import Hubs
 
 TOOL_NAMES = (
     "search_products",
     "evaluate_offer",
     "suggest_bundle",
+    "suggest_addons",
+    "ask_shopkeeper",
     "add_to_basket",
     "remove_from_basket",
+    "send_basket_to_shopkeeper",
     "propose_mandate",
 )
 
 S = SessionState
 STATE_TOOLS: dict[SessionState, tuple[str, ...]] = {
     S.intro: (),
-    S.discovery: ("search_products", "evaluate_offer"),
+    S.discovery: ("search_products", "evaluate_offer", "suggest_addons"),
     S.negotiating: (
         "search_products",
         "evaluate_offer",
         "suggest_bundle",
+        "suggest_addons",
+        "ask_shopkeeper",
         "add_to_basket",
         "remove_from_basket",
+        "send_basket_to_shopkeeper",
     ),
     S.pending_merchant: (),
     S.briefing: ("search_products", "propose_mandate"),
@@ -77,10 +83,15 @@ class EvaluateArgs(BaseModel):
     offered_amount: Decimal = Field(gt=0, lt=10_000_000)
     offer_scope: Literal["per_unit", "line", "basket"] = "per_unit"
     buy_now: bool = False
+    proposed_price: Decimal | None = Field(default=None, gt=0, lt=10_000_000)
 
 
 class BundleArgs(BaseModel):
     product_ids: list[str] = Field(min_length=2, max_length=6)
+
+
+class AddonArgs(BaseModel):
+    product_ids: list[str] = Field(min_length=1, max_length=6)
 
 
 class EvaluationArgs(BaseModel):
@@ -122,7 +133,9 @@ _SCHEMAS: dict[str, dict[str, Any]] = {
     "evaluate_offer": _fn(
         "evaluate_offer",
         "Ask the pricing engine about a customer's offer. Returns decision accept/counter/reject, price, "
-        "reason_code, round and final. The only source of prices.",
+        "reason_code, round, final, headroom (high/medium/low/none: how much you may still concede) and "
+        "customer_read with guidance. The only source of prices. Pass proposed_price to choose your own "
+        "counter; the engine keeps it inside the shop's safe range and may replace it.",
         {
             "items": {
                 "type": "array",
@@ -142,6 +155,10 @@ _SCHEMAS: dict[str, dict[str, Any]] = {
                 "type": "boolean",
                 "description": "true only if the customer clearly says they will take it right now",
             },
+            "proposed_price": {
+                "type": "string",
+                "description": "optional: the total in whole rupees you want to counter with, digits only. Pass it to hold out for more even when the customer's offer is acceptable; omit it to take the customer's offer if the shop can. Start high and concede in shrinking steps, guided by headroom.",
+            },
         },
         ["items", "offered_amount"],
     ),
@@ -150,6 +167,27 @@ _SCHEMAS: dict[str, dict[str, Any]] = {
         "Get the shop's price for taking several products together (2 or more). Use it to pitch a pair.",
         {"product_ids": {"type": "array", "items": {"type": "string"}}},
         ["product_ids"],
+    ),
+    "suggest_addons": _fn(
+        "suggest_addons",
+        "Get up to 2 products worth offering: 'upgrade' is a better version of a product the customer is "
+        "considering (works before it is in the basket), 'pairs_with' goes with a product already in the basket. "
+        "Ask about at most one, as a question; never add it yourself.",
+        {
+            "product_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "products the customer is considering or already has in the basket",
+            }
+        },
+        ["product_ids"],
+    ),
+    "ask_shopkeeper": _fn(
+        "ask_shopkeeper",
+        "Ask the shopkeeper about one offer, only when the evaluate_offer result says shopkeeper_check_possible. "
+        "Use it at most once; afterwards tell the customer you are checking and quote no price.",
+        {"evaluation_id": {"type": "string", "description": "evaluation_id of that evaluate_offer result"}},
+        ["evaluation_id"],
     ),
     "add_to_basket": _fn(
         "add_to_basket",
@@ -167,6 +205,13 @@ _SCHEMAS: dict[str, dict[str, Any]] = {
         "Remove a product from the basket.",
         {"product_id": {"type": "string"}},
         ["product_id"],
+    ),
+    "send_basket_to_shopkeeper": _fn(
+        "send_basket_to_shopkeeper",
+        "Send the customer's basket to the shopkeeper for approval (same as the customer pressing Send). "
+        "Only when the customer clearly asks for it and the basket is not empty.",
+        {},
+        [],
     ),
     "propose_mandate": _fn(
         "propose_mandate",
@@ -247,7 +292,8 @@ async def _run(ctx: ToolContext, name: str, arguments: dict[str, Any]) -> dict[s
     match name:
         case "search_products":
             args = SearchArgs.model_validate(arguments)
-            found = await catalog.search_products(db, args.query)
+            owner = await sessions.get_session(db, sid)
+            found = await catalog.search_products(db, args.query, owner.merchant_id)
             return {
                 "products": [
                     {**p.model_dump(mode="json"), "listed_price": offers.rupees(p.listed_price)}
@@ -264,6 +310,7 @@ async def _run(ctx: ToolContext, name: str, arguments: dict[str, Any]) -> dict[s
                 args.offered_amount,
                 OfferScope(args.offer_scope),
                 args.buy_now,
+                args.proposed_price,
             )
             if result["reason_code"] in ERROR_REASONS:
                 if result["reason_code"] == ReasonCode.OFFER_ABOVE_LISTED:
@@ -273,13 +320,30 @@ async def _run(ctx: ToolContext, name: str, arguments: dict[str, Any]) -> dict[s
         case "suggest_bundle":
             args = BundleArgs.model_validate(arguments)
             bundle = await offers.suggest_bundle(db, hubs, sid, args.product_ids)
-            return bundle if bundle is not None else {"error": ReasonCode.BUNDLE_NOT_ALLOWED.value}
+            return (
+                bundle
+                if bundle is not None
+                else {"suggestion": None, "message": "No valid multi-item quote for those products."}
+            )
+        case "suggest_addons":
+            args = AddonArgs.model_validate(arguments)
+            return {"addons": await catalog.suggest_addons(db, sid, args.product_ids)}
+        case "ask_shopkeeper":
+            args = EvaluationArgs.model_validate(arguments)
+            return await price_checks.ask(db, hubs, sid, args.evaluation_id)
         case "add_to_basket":
             args = EvaluationArgs.model_validate(arguments)
-            return _basket_json(await basket.add_from_evaluation(db, hubs, sid, args.evaluation_id))
+            session = await sessions.get_session(db, sid)
+            await consent.require_granted(db, session, args.evaluation_id)
+            result = _basket_json(await basket.add_from_evaluation(db, hubs, sid, args.evaluation_id))
+            await consent.clear(db, session)
+            return result
         case "remove_from_basket":
             args = RemoveArgs.model_validate(arguments)
             return _basket_json(await basket.remove(db, hubs, sid, args.product_id))
+        case "send_basket_to_shopkeeper":
+            session, public = await basket.confirm(db, hubs, sid)
+            return {"sent": True, "state": session.state.value, **_basket_json(public)}
         case "propose_mandate":
             parsed = mandates.MandateArgs.model_validate(arguments)
             mandate, proposal = await mandates.propose(db, hubs, sid, parsed)

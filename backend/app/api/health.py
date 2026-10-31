@@ -82,3 +82,40 @@ async def health(request: Request, response: Response) -> Health:
     ok = all(c.status != "error" for c in checks.values())
     response.status_code = 200 if ok else 503
     return Health(status="ok" if ok else "error", checks=checks)
+
+
+class MerchantCheck(BaseModel):
+    key: Literal["shop_data", "assistant", "voice"]
+    state: Literal["ok", "slow", "down"]
+    message: str
+
+
+class MerchantHealth(BaseModel):
+    status: Literal["ok", "attention", "down"]
+    checks: list[MerchantCheck]
+
+
+_PLAIN = {
+    "db": ("shop_data", "Working", "Shop data is unavailable. Try again in a minute."),
+    "openrouter": ("assistant", "Working", "Calls may lag or fail. Try again in a minute."),
+    "sarvam": ("voice", "Working", "Voice may be unavailable. Customers can still type."),
+}
+
+
+@router.get("/merchant/health", response_model=MerchantHealth)
+async def merchant_health(request: Request) -> MerchantHealth:
+    """Plain-language status for the dashboard chip; vendor names stay in logs and `/health`."""
+    full = await health(request, Response())
+    checks = []
+    for name, check in full.checks.items():
+        key, ok_message, fix = _PLAIN[name]
+        down = check.status == "error"
+        if down:
+            log.warning("merchant health: %s check failed (%s)", name, check.detail)
+        checks.append(
+            MerchantCheck(key=key, state="down" if down else "ok", message=fix if down else ok_message)
+        )
+    bad = sum(c.state == "down" for c in checks)
+    return MerchantHealth(
+        status="ok" if not bad else "down" if bad == len(checks) else "attention", checks=checks
+    )

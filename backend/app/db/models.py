@@ -63,8 +63,14 @@ class Merchant(Base):
     shop_description: Mapped[str] = mapped_column(Text, default="")
     languages: Mapped[list[str]] = mapped_column(ARRAY(String(16)))
     negotiation_instructions: Mapped[str] = mapped_column(Text, default="")
-    bundle_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Legacy persisted flags are always-on at the service layer and are not exposed to merchants.
+    bundle_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
     qr_token: Mapped[str] = mapped_column(String(64), unique=True)
+    escalation: Mapped[str] = mapped_column(String(16), default="serious")  # never|serious|rare|when_close
+    escalation_gap_pct: Mapped[int] = mapped_column(Integer, default=5)
+    upsell_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Legacy setup proposal column retained for existing databases; the setup chat was removed.
+    pending_style: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
 
 class Product(Base):
@@ -82,6 +88,14 @@ class Product(Base):
     unit_cost: Mapped[Decimal] = mapped_column(Money)
     available_stock: Mapped[int] = mapped_column(Integer)
     negotiable: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Negotiator-only facts the merchant provided (public). docs/data.md#tables
+    pitch: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selling_points: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    specs: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    best_for: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    objection_replies: Mapped[list[dict[str, str]] | None] = mapped_column(JSONB, nullable=True)
+    pairs_with_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    upsell_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
 
 
 class Goal(Base):
@@ -105,6 +119,13 @@ class Session(Base):
     )
     language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     intent: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # Customer consent for basket adds: {stage, evaluation_id, turn, asked} (docs/engine.md#basket-consent)
+    consent: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    escalations: Mapped[int] = mapped_column(Integer, default=0)
+    # Open "ask the shopkeeper" request: {evaluation_id, items, offered_amount} (docs/engine.md#escalation)
+    pending_check: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    customer_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    source: Mapped[str] = mapped_column(String(8), default="live")  # live | seed (synthetic history)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -119,6 +140,16 @@ class Message(Base):
     text: Mapped[str] = mapped_column(Text)
     language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     text_translated: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TurnTiming(Base):
+    __tablename__ = "turn_timings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.session_id"), index=True)
+    message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.id"))
+    measurements: Mapped[dict[str, Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -162,6 +193,8 @@ class Offer(Base):
     round: Mapped[int] = mapped_column(Integer)
     final: Mapped[bool] = mapped_column(Boolean, default=False)
     threshold: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    profile: Mapped[str | None] = mapped_column(String(16), nullable=True)  # merchant-only
+    headroom: Mapped[str | None] = mapped_column(String(8), nullable=True)  # merchant-only
     mandate_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("mandates.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

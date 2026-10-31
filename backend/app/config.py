@@ -66,6 +66,16 @@ class Settings(DatabaseSettings):
     # A language with no entry uses Sarvam's default voice.
     sarvam_tts_speakers: Annotated[dict[str, str], NoDecode] = {}
     use_fake_speech: bool = False
+    # Speaking rate for every voice (Bulbul v4 accepts 0.5-2.0; 1.0 is default, below is slower).
+    sarvam_tts_pace: float = Field(default=0.9, ge=0.5, le=2.0)
+    # The shopkeeper's own language: target of the merchant-side translation and the briefing chat.
+    # There is no per-shop setting; the shop serves every language in app/languages.py.
+    merchant_language: str = "en-IN"
+    # Quiet time after the customer's last words before Hermion answers; shorter pauses are the same turn.
+    # 0 disables waiting. The wait adapts: long after an unfinished clause, short after a full sentence.
+    voice_endpoint_ms: int = Field(default=1600, ge=0, le=10_000)
+    voice_endpoint_short_ms: int = Field(default=1200, ge=0, le=10_000)
+    voice_endpoint_long_ms: int = Field(default=2200, ge=0, le=10_000)
 
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000", "http://localhost:3001"]
     log_level: str = "INFO"
@@ -81,6 +91,11 @@ class Settings(DatabaseSettings):
             if isinstance(data.get(k), str):
                 data[k] = parse_speaker_map(data[k])
         return data
+
+    @model_validator(mode="after")
+    def _known_merchant_language(self) -> "Settings":
+        languages.require(self.merchant_language)
+        return self
 
     @model_validator(mode="after")
     def _require_keys(self) -> "Settings":

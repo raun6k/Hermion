@@ -20,22 +20,23 @@ class TextInput(Schema):
     text: str = Field(min_length=1, max_length=1000)
 
 
+class VoiceStart(Schema):
+    type: Literal["voice_start"] = "voice_start"
+
+
 class Mute(Schema):
     type: Literal["mute"] = "mute"
     muted: bool
 
 
-class LanguagePin(Schema):
-    type: Literal["language"] = "language"
-    code: str | None
+class UiLanguage(Schema):
+    """The customer's interface language; Hermion's greeting uses it. Speech is always auto-detected."""
 
-
-class LanguageSelection(Schema):
-    type: Literal["select_language"] = "select_language"
+    type: Literal["ui_language"] = "ui_language"
     code: str = Field(min_length=1)
 
 
-CustomerInbound = Annotated[TextInput | Mute | LanguagePin | LanguageSelection, Field(discriminator="type")]
+CustomerInbound = Annotated[TextInput | Mute | UiLanguage | VoiceStart, Field(discriminator="type")]
 customer_inbound_adapter: TypeAdapter[CustomerInbound] = TypeAdapter(CustomerInbound)
 
 # ---- server -> customer -------------------------------------------------------------
@@ -45,11 +46,6 @@ class StateEvent(Schema):
     type: Literal["state"] = "state"
     state: SessionStateName
     message: str | None = None
-
-
-class LanguageSelectedEvent(Schema):
-    type: Literal["language_selected"] = "language_selected"
-    code: str
 
 
 class AgentStateEvent(Schema):
@@ -93,7 +89,6 @@ class ErrorEvent(Schema):
 
 CustomerOutbound = (
     StateEvent
-    | LanguageSelectedEvent
     | AgentStateEvent
     | TranscriptEvent
     | TtsEnd
@@ -121,14 +116,23 @@ class SessionStateEvent(Schema):
 class TraceEvent(Schema):
     type: Literal["trace"] = "trace"
     session_id: UUID
-    kind: Literal["message", "offer", "basket", "mandate", "tool_call"]
+    kind: Literal["message", "offer", "basket", "mandate", "tool_call", "timing"]
     data: dict[str, Any]
+
+
+class PriceCheck(Schema):
+    """Hermion asks the shopkeeper about one offer just below the floor (not a basket)."""
+
+    evaluation_id: UUID
+    items: list[dict[str, Any]]
+    offered_amount: Money
 
 
 class DealRequestEvent(Schema):
     type: Literal["deal_request"] = "deal_request"
     session_id: UUID
     basket: MerchantBasket
+    price_check: PriceCheck | None = None
 
 
 MerchantOutbound = SessionCreatedEvent | SessionStateEvent | TraceEvent | DealRequestEvent

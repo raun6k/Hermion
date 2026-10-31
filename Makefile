@@ -3,7 +3,7 @@ SHELL := /bin/bash
 BACKEND := uv run --directory backend
 FRONTEND := pnpm --dir frontend
 
-.PHONY: help up down logs dev dev-backend dev-frontend db migrate seed test test-backend test-frontend lint smoke eval e2e install
+.PHONY: help up down logs dev dev-backend dev-frontend db migrate seed seed-history seed-history-clear test test-backend test-frontend lint smoke eval e2e install
 
 help:  ## List targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -40,6 +40,12 @@ migrate: db  ## Alembic upgrade head
 
 seed: db  ## Load backend/seed/ into the DB
 	$(BACKEND) python -m app.seed
+
+seed-history: db  ## Replay ~30 days of synthetic sessions through the real engine (source=seed)
+	$(BACKEND) python -m app.seed_history
+
+seed-history-clear: db  ## Remove the synthetic history
+	$(BACKEND) python -m app.seed_history --clear
 
 lint:  ## Ruff + ESLint
 	$(BACKEND) ruff check .

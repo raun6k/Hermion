@@ -16,6 +16,7 @@ from app.db.models import (
     Session,
     StateChange,
     ToolCallTrace,
+    TurnTiming,
 )
 from app.schemas.common import AppError
 from app.schemas.merchant import (
@@ -28,6 +29,7 @@ from app.schemas.merchant import (
     TraceMessage,
     TraceOffer,
     TraceStateChange,
+    TraceTiming,
     TraceToolCall,
 )
 from app.schemas.public import BasketLinePublic, BasketPublic
@@ -49,7 +51,11 @@ async def public_basket(db: AsyncSession, session_id: uuid.UUID) -> BasketPublic
     rows = await live_lines(db, session_id)
     lines = [
         BasketLinePublic(
-            product_id=p.product_id, product_name=p.product_name, qty=line.qty, line_total=line.line_total
+            product_id=p.product_id,
+            product_name=p.product_name,
+            qty=line.qty,
+            line_total=line.line_total,
+            listed_total=p.listed_price * line.qty,
         )
         for line, p in rows
     ]
@@ -77,8 +83,11 @@ async def merchant_basket(db: AsyncSession, session_id: uuid.UUID) -> MerchantBa
     )
 
 
-def _summary(session: Session, line_count: int, total: Decimal | None) -> SessionSummary:
+def _summary(session: Session, line_count: int, total: Decimal | None, guest: int = 0) -> SessionSummary:
     return SessionSummary(
+        customer_name=session.customer_name,
+        price_check=session.pending_check,
+        display_name=session.customer_name or f"Guest {guest}",
         session_id=session.session_id,
         state=session.state,
         language=session.language,
@@ -97,13 +106,22 @@ async def session_summary(db: AsyncSession, session: Session) -> SessionSummary:
             )
         )
     ).one()
-    return _summary(session, count, total)
+    guest = await db.scalar(
+        select(func.count(Session.session_id)).where(
+            Session.merchant_id == session.merchant_id,
+            Session.customer_name.is_(None),
+            Session.started_at <= session.started_at,
+        )
+    )
+    return _summary(session, count, total, guest or 0)
 
 
-async def list_summaries(db: AsyncSession, scope: str) -> list[SessionSummary]:
+async def list_summaries(db: AsyncSession, scope: str, merchant_id: str = "M001") -> list[SessionSummary]:
     terminal = Session.state.in_(TERMINAL_STATES)
     sessions = await db.scalars(
-        select(Session).where(terminal if scope == "past" else ~terminal).order_by(Session.started_at.desc())
+        select(Session)
+        .where(terminal if scope == "past" else ~terminal, Session.merchant_id == merchant_id)
+        .order_by(Session.started_at.desc())
     )
     return [await session_summary(db, s) for s in sessions]
 
@@ -169,6 +187,11 @@ async def session_trace(db: AsyncSession, session_id: uuid.UUID) -> SessionTrace
         .where(StateChange.session_id == session_id)
         .order_by(StateChange.created_at, StateChange.id)
     )
+    timings = await db.scalars(
+        select(TurnTiming)
+        .where(TurnTiming.session_id == session_id)
+        .order_by(TurnTiming.created_at, TurnTiming.id)
+    )
     mandate = await latest_mandate(db, session_id)
     basket = await merchant_basket(db, session_id)
     return SessionTrace(
@@ -177,6 +200,7 @@ async def session_trace(db: AsyncSession, session_id: uuid.UUID) -> SessionTrace
         offers=[TraceOffer.model_validate(o) for o in offers],
         tool_calls=[TraceToolCall.model_validate(t) for t in tool_calls],
         state_changes=[TraceStateChange.model_validate(c) for c in changes],
+        turn_timings=[TraceTiming.model_validate(t) for t in timings],
         basket=basket if basket.lines else None,
         mandate=mandate_proposal(mandate) if mandate else None,
     )

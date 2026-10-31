@@ -6,9 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 
 from app.agent.briefing import handle_briefing
-from app.agent.customer import resume_customer
-from app.api.deps import DbDep, HubsDep
-from app.schemas.common import not_implemented
+from app.agent.customer import announce_price_check, resume_customer
+from app.api.deps import DbDep, HubsDep, MerchantIdDep
 from app.schemas.merchant import (
     BasketEdit,
     BriefingRequest,
@@ -18,6 +17,7 @@ from app.schemas.merchant import (
     MerchantBasket,
     MerchantPatch,
     MerchantProfile,
+    PriceCheckAnswer,
     Product,
     ProductCreate,
     ProductPatch,
@@ -27,56 +27,57 @@ from app.schemas.merchant import (
     SessionTrace,
     Stats,
 )
-from app.services import basket, catalog, mandates, views
+from app.services import basket, catalog, mandates, price_checks, sessions, views
+from app.services import stats as stats_service
 
 router = APIRouter(prefix="/merchant", tags=["merchant"])
 
 
 @router.get("", response_model=MerchantProfile)
-async def get_profile(db: DbDep) -> MerchantProfile:
-    return MerchantProfile.model_validate(await catalog.get_merchant(db))
+async def get_profile(db: DbDep, mid: MerchantIdDep) -> MerchantProfile:
+    return MerchantProfile.model_validate(await catalog.get_merchant(db, mid))
 
 
 @router.patch("", response_model=MerchantProfile)
-async def patch_profile(body: MerchantPatch, db: DbDep) -> MerchantProfile:
-    return MerchantProfile.model_validate(await catalog.patch_merchant(db, body))
+async def patch_profile(body: MerchantPatch, db: DbDep, mid: MerchantIdDep) -> MerchantProfile:
+    return MerchantProfile.model_validate(await catalog.patch_merchant(db, body, mid))
 
 
 @router.get("/products", response_model=list[Product])
-async def list_products(db: DbDep) -> list[Product]:
-    return [Product.model_validate(p) for p in await catalog.list_products(db)]
+async def list_products(db: DbDep, mid: MerchantIdDep) -> list[Product]:
+    return [Product.model_validate(p) for p in await catalog.list_products(db, mid)]
 
 
 @router.post("/products", response_model=Product, status_code=201)
-async def create_product(body: ProductCreate, db: DbDep) -> Product:
-    return Product.model_validate(await catalog.create_product(db, body))
+async def create_product(body: ProductCreate, db: DbDep, mid: MerchantIdDep) -> Product:
+    return Product.model_validate(await catalog.create_product(db, body, mid))
 
 
 @router.patch("/products/{product_id}", response_model=Product)
-async def patch_product(product_id: str, body: ProductPatch, db: DbDep) -> Product:
-    return Product.model_validate(await catalog.patch_product(db, product_id, body))
+async def patch_product(product_id: str, body: ProductPatch, db: DbDep, mid: MerchantIdDep) -> Product:
+    return Product.model_validate(await catalog.patch_product(db, product_id, body, mid))
 
 
 @router.delete("/products/{product_id}", status_code=204)
-async def delete_product(product_id: str, db: DbDep) -> None:
-    await catalog.delete_product(db, product_id)
+async def delete_product(product_id: str, db: DbDep, mid: MerchantIdDep) -> None:
+    await catalog.delete_product(db, product_id, mid)
 
 
 @router.get("/goals", response_model=list[Goal])
-async def list_goals(db: DbDep) -> list[Goal]:
-    return [Goal.model_validate(g) for g in await catalog.list_goals(db)]
+async def list_goals(db: DbDep, mid: MerchantIdDep) -> list[Goal]:
+    return [Goal.model_validate(g) for g in await catalog.list_goals(db, mid)]
 
 
 @router.put("/goals", response_model=list[Goal])
-async def replace_goals(body: list[Goal], db: DbDep) -> list[Goal]:
-    return [Goal.model_validate(g) for g in await catalog.replace_goals(db, body)]
+async def replace_goals(body: list[Goal], db: DbDep, mid: MerchantIdDep) -> list[Goal]:
+    return [Goal.model_validate(g) for g in await catalog.replace_goals(db, body, mid)]
 
 
 @router.get("/sessions", response_model=list[SessionSummary])
 async def list_sessions(
-    db: DbDep, scope: str = Query("live", pattern="^(live|past)$")
+    db: DbDep, mid: MerchantIdDep, scope: str = Query("live", pattern="^(live|past)$")
 ) -> list[SessionSummary]:
-    return await views.list_summaries(db, scope)
+    return await views.list_summaries(db, scope, mid)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionTrace)
@@ -121,5 +122,16 @@ async def edit_basket(
 
 
 @router.get("/stats", response_model=Stats)
-async def stats() -> Stats:
-    raise not_implemented("Stats")  # Stage 3
+async def stats(db: DbDep, mid: MerchantIdDep, days: int | None = Query(None, ge=1, le=365)) -> Stats:
+    return await stats_service.merchant_stats(db, mid, days)
+
+
+@router.post("/sessions/{session_id}/price-check", response_model=ReviewResponse)
+async def answer_price_check(
+    session_id: UUID, body: PriceCheckAnswer, request: Request, db: DbDep, hubs: HubsDep
+) -> ReviewResponse:
+    """Accept, counter or decline Hermion's question about one close offer."""
+    async with request.app.state.turn_locks.setdefault(session_id, asyncio.Lock()):
+        action, offer = await price_checks.answer(db, hubs, session_id, body.action, body.price)
+        await announce_price_check(db, hubs, request.app.state.llm, session_id, action, offer)
+        return ReviewResponse(state=(await sessions.get_session(db, session_id)).state)

@@ -19,6 +19,7 @@ os.environ.update(
     DATABASE_URL=_test_db,
     USE_FAKE_LLM="true",
     USE_FAKE_SPEECH="true",
+    VOICE_ENDPOINT_MS="0",
     OPENROUTER_API_KEY="",
     SARVAM_API_KEY="",
 )

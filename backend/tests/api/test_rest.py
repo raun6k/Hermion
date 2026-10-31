@@ -2,6 +2,8 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from app import languages
+
 QR = "hermion-m001-demo"
 
 
@@ -21,10 +23,8 @@ def test_session_lifecycle(client: TestClient) -> None:
     sid = r.json()["session_id"]
 
     again = client.post("/sessions", json={"qr_token": QR, "device_id": device})
-    assert again.status_code == 409
-    assert again.json() == {
-        "error": {"code": "SESSION_ACTIVE", "message": "Exit your current session to scan again"}
-    }
+    assert again.status_code == 200  # scanning again resumes the live session
+    assert again.json() == {"session_id": sid}
 
     assert client.post(f"/sessions/{sid}/exit").json() == {"state": "exited"}
     assert client.post(f"/sessions/{sid}/exit").json() == {"state": "exited"}  # idempotent
@@ -43,13 +43,17 @@ def test_validation_uses_error_envelope(client: TestClient) -> None:
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-def test_unbuilt_routes_return_501(client: TestClient) -> None:
-    for method, path, body in [
-        ("get", "/merchant/stats", None),  # Stage 3
-    ]:
-        r = getattr(client, method)(path, **({"json": body} if body else {}))
-        assert r.status_code == 501, path
-        assert r.json()["error"]["code"] == "NOT_IMPLEMENTED"
+def test_stats_returns_counts_and_money(client: TestClient) -> None:
+    before = client.get("/merchant/stats")
+    assert before.status_code == 200
+    data = before.json()
+    assert {"sessions", "offers", "deals", "avg_discount_pct", "total_contribution"} <= set(data)
+    assert {"funnel", "per_day", "top_products", "language_mix", "revenue_won"} <= set(data)
+    sid = client.post("/sessions", json={"qr_token": QR, "device_id": str(uuid.uuid4())}).json()["session_id"]
+    after = client.get("/merchant/stats").json()
+    assert after["sessions"] == data["sessions"] + 1
+    assert after["deals"] == data["deals"]
+    client.post(f"/sessions/{sid}/exit")
 
 
 def test_tts_test_clip_any_supported_language(client: TestClient) -> None:
@@ -89,7 +93,13 @@ def test_customer_session_view_exposes_only_public_facts(client: TestClient) -> 
         "session_id": sid,
         "state": "intro",
         "language": None,
-        "languages": ["hi-IN", "te-IN", "kn-IN", "en-IN"],
+        "languages": list(languages.LANGUAGES),
     }
     assert client.get(f"/sessions/{uuid.uuid4()}").json()["error"]["code"] == "SESSION_NOT_FOUND"
     client.post(f"/sessions/{sid}/exit")
+
+
+def test_shop_is_public_and_lists_languages(client: TestClient) -> None:
+    body = client.get("/shop").json()
+    assert set(body) == {"shop_name", "languages"}
+    assert body["languages"] == client.get("/merchant").json()["languages"]

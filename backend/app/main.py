@@ -16,6 +16,7 @@ from app.db.session import dispose_engine
 from app.log import request_id, setup_logging
 from app.schemas.common import AppError
 from app.services.hub import CustomerHub, Hubs, MerchantHub
+from app.speech.translate import build_translator
 
 log = logging.getLogger(__name__)
 
@@ -27,10 +28,10 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.llm = build_llm_client(settings)
     app.state.merchant_hub = MerchantHub()
+    app.state.merchant_hub.translator = build_translator(settings)
     app.state.customer_hub = CustomerHub()
     app.state.hubs = Hubs(app.state.merchant_hub, app.state.customer_hub)
     app.state.turn_locks = {}
-    app.state.language_pins = {}
     log.info(
         "hermion backend up (llm=%s, fake_llm=%s, fake_speech=%s)",
         settings.llm_model,
@@ -38,6 +39,12 @@ async def lifespan(app: FastAPI):
         settings.use_fake_speech,
     )
     yield
+    for task in app.state.merchant_hub.translation_tasks:
+        task.cancel()
+    if app.state.merchant_hub.translation_tasks:
+        import asyncio
+
+        await asyncio.gather(*app.state.merchant_hub.translation_tasks, return_exceptions=True)
     await dispose_engine()
 
 
@@ -81,6 +88,7 @@ def create_app() -> FastAPI:
         dev.router,
         health.router,
         rest_customer.router,
+        rest_customer.shop_router,
         rest_merchant.router,
         ws_customer.router,
         ws_merchant.router,

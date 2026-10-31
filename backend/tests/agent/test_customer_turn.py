@@ -9,6 +9,39 @@ from app.services import sessions, trace, views
 from tests.helpers import QR, new_hubs, with_db
 
 
+async def test_marathi_shirt_request_after_declining_socks() -> None:
+    async def exercise(db):
+        hubs = new_hubs()
+        session = await sessions.create_session(db, QR, str(uuid.uuid4()))
+        await sessions.transition(db, hubs, session.session_id, SessionState.discovery)
+        await sessions.transition(db, hubs, session.session_id, SessionState.negotiating)
+        for speaker, text in [
+            ("customer", "नाही मला नको आहे मग"),
+            ("hermion", "ठीक आहे, इतर काही शोधू का?"),
+            ("customer", "तुझ्याकडे men's cotton shirt आहे का?"),
+        ]:
+            await trace.record_message(
+                db, hubs.merchant, session.session_id, channel="customer", speaker=speaker, text=text
+            )
+        llm = FakeLLMClient(
+            [
+                LLMResponse(
+                    text=None,
+                    tool_calls=[ToolCall("search", "search_products", {"query": "men's cotton shirt"})],
+                ),
+                LLMResponse(text="हो, men's cotton shirt आहे. कोणता रंग हवा?"),
+            ]
+        )
+        reply = await customer_turn(
+            db, hubs, llm, session.session_id, "तुझ्याकडे men's cotton shirt आहे का?", stt_language="mr-IN"
+        )
+        assert reply == "हो, men's cotton shirt आहे. कोणता रंग हवा?"
+        history = await views.session_trace(db, session.session_id)
+        assert any(t.name == "search_products" and t.result["products"] for t in history.tool_calls)
+
+    await with_db(exercise)
+
+
 async def test_customer_turn_dispatches_offer_and_guards_response() -> None:
     async def exercise(db):
         hubs = new_hubs()
@@ -122,5 +155,48 @@ async def test_greeting_fallback_is_observable_to_evaluation() -> None:
         )
         assert used_fallback == [True]
         assert "నమస్కారం" in reply
+
+    await with_db(exercise)
+
+
+async def test_accepted_offer_id_is_available_for_later_basket_confirmation() -> None:
+    from decimal import Decimal
+
+    from app.engine.types import OfferItem, OfferScope
+    from app.services import offers
+
+    async def exercise(db):
+        hubs = new_hubs()
+        session = await sessions.create_session(db, QR, str(uuid.uuid4()))
+        await sessions.transition(db, hubs, session.session_id, SessionState.discovery)
+        accepted = await offers.evaluate(
+            db,
+            hubs,
+            session.session_id,
+            [OfferItem("SHIRT-BLU-M", 1)],
+            Decimal("1000"),
+            OfferScope.line,
+            False,
+        )
+        assert accepted["decision"] == "accept"
+        llm = FakeLLMClient(
+            [
+                LLMResponse(
+                    text=None,
+                    tool_calls=[
+                        ToolCall("add", "add_to_basket", {"evaluation_id": accepted["evaluation_id"]})
+                    ],
+                ),
+                LLMResponse(text="I added it to your basket."),
+            ]
+        )
+        await trace.record_message(
+            db, hubs.merchant, session.session_id, channel="customer", speaker="customer", text="yes"
+        )
+        await customer_turn(db, hubs, llm, session.session_id, "yes")
+        state = llm.calls[0][1]["content"]
+        assert str(accepted["evaluation_id"]) in state
+        assert "minimum_price" not in state and "threshold" not in state
+        assert (await views.public_basket(db, session.session_id)).lines[0].line_total == Decimal("1000")
 
     await with_db(exercise)

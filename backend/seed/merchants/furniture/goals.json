@@ -1,0 +1,11 @@
+[
+  {
+    "goal_id": "G201",
+    "merchant_id": "M003",
+    "goal_type": "clear_stock",
+    "product_ids": [
+      "CHAIR-OFFICE-BLK"
+    ],
+    "instructions": "Mention the office chair with any desk."
+  }
+]

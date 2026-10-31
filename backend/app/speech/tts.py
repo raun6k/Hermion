@@ -67,6 +67,7 @@ class SarvamTTS:
     def __init__(self, settings: Settings, model: str = "bulbul:v4-flash") -> None:
         self._key, self._model = settings.sarvam_api_key, model
         self._speakers = dict(settings.sarvam_tts_speakers)
+        self._pace = settings.sarvam_tts_pace
 
     def _config(self, language_code: str, sample_rate: int) -> dict:
         config: dict = {
@@ -74,6 +75,7 @@ class SarvamTTS:
             "output_audio_codec": "linear16",
             "speech_sample_rate": sample_rate,
             "enable_preprocessing": True,
+            "pace": self._pace,
         }
         if speaker := self._speakers.get(language_code):
             config["speaker"] = speaker

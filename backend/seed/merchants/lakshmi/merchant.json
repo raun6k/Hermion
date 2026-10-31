@@ -1,0 +1,9 @@
+{
+  "merchant_id": "M001",
+  "shop_name": "Lakshmi Fashions",
+  "shop_description": "Lakshmi Fashions sells everyday clothing and accessories near Jayanagar 4th Block, Bengaluru. Its catalog includes cotton shirts, kurtas, sarees, and leather belts in selected sizes and colours. Customers can compare fabric, fit, listed care details, and options for work, daily wear, family occasions, or gifting.",
+  "negotiation_instructions": "Start by understanding the occasion, preferred fit or colour, and quantity. Explain only facts in the catalog, especially fabric, fit, care details where listed, and available sizes. Make measured counters using engine prices, and consider quantity offers or listed shirt-and-belt pairings when they fit the customer's request. Keep the tone warm and patient; ask before suggesting an alternative and stop if it is declined. Never promise a price, stock, or product detail the catalog does not support.",
+  "qr_token": "hermion-m001-demo",
+  "escalation": "serious",
+  "escalation_gap_pct": 5
+}

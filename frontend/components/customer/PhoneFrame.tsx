@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 // Phone chrome: status bar, Dynamic Island, deep-blue screen (docs/frontend.md). `overlay` renders above the
 // screen but outside its rounded clip, so the draggable scanner can leave the phone.
-export function PhoneFrame({ children, status, overlay }: { children: ReactNode; status?: ReactNode; overlay?: ReactNode }) {
+export function PhoneFrame({ children, status, overlay, corner, modal }: { children: ReactNode; status?: ReactNode; overlay?: ReactNode; corner?: ReactNode; modal?: ReactNode }) {
   return (
     <div className="relative h-[660px] w-[330px]" data-testid="phone">
       <div className="absolute inset-0 flex flex-col overflow-hidden rounded-[44px] border-[9px] border-slate-950 bg-[#062a86] text-white shadow-[0_10px_32px_rgba(0,0,0,0.5)]">
@@ -13,6 +13,8 @@ export function PhoneFrame({ children, status, overlay }: { children: ReactNode;
         </div>
         {status && <div className="mt-5 text-center text-xs font-medium text-white/80">{status}</div>}
         <div className="relative flex min-h-0 flex-1 flex-col">{children}</div>
+        {corner}
+        {modal}
       </div>
       {overlay && <div className="pointer-events-none absolute inset-0 z-30">{overlay}</div>}
     </div>

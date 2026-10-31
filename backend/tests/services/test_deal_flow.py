@@ -253,6 +253,7 @@ def test_transition_table() -> None:
         (S.pending_merchant, S.declined),
         (S.pending_merchant, S.briefing),
         (S.pending_merchant, S.in_person),
+        (S.pending_merchant, S.negotiating),  # the customer rejoins Hermion to change the basket
         (S.briefing, S.negotiating),
         (S.in_person, S.accepted),
         (S.in_person, S.declined),

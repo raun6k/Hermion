@@ -31,6 +31,9 @@ class ReasonCode(StrEnum):
     BUNDLE_NOT_ALLOWED = "BUNDLE_NOT_ALLOWED"
     INVALID_OFFER = "INVALID_OFFER"
     OFFER_ABOVE_LISTED = "OFFER_ABOVE_LISTED"
+    PROPOSAL_BELOW_FLOOR = "PROPOSAL_BELOW_FLOOR"
+    CLOSING_BELOW_TARGET = "CLOSING_BELOW_TARGET"
+    HELD_FOR_MORE = "HELD_FOR_MORE"  # the offer was acceptable, Hermion countered higher to win more
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,10 @@ class NegotiationContext:
     mandate_rules: tuple[MandateRule, ...] = ()
     bundle_allowed: bool = False
     last_counter: tuple[LinePrice, ...] = field(default_factory=tuple)
+    escalation_mode: str = "serious"  # never | serious | rare | when_close
+    escalation_gap_pct: int = 5
+    escalations_used: int = 0
+    customer_serious: bool = True  # not lowballing (services/behavior); gates the `serious` escalation
 
 
 @dataclass(frozen=True)
@@ -90,3 +97,6 @@ class Evaluation:
     threshold: Decimal | None = None  # merchant-only; never shown to customer or LLM
     signals: tuple[str, ...] = ()  # which of buy_now / qty / basket / clear_stock raised the round
     mandate_applied: bool = False
+    escalation_eligible: bool = False  # offer is just below the floor and the merchant allows a check
+    headroom: str | None = None  # high|medium|low|none; the only range signal the LLM sees
+    acceptable: bool = False  # on HELD_FOR_MORE: the customer's own offer could still be accepted

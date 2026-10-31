@@ -49,7 +49,8 @@ export default defineConfig({
       command: `pnpm build && pnpm start --port ${MOCK_PORT}`,
       url: `http://localhost:${MOCK_PORT}`,
       env: { NEXT_PUBLIC_USE_MOCKS: "true", NEXT_DIST_DIR: ".next-mocks" },
-      reuseExistingServer: false,
+      // E2E_REUSE_MOCKS=1 runs the mock project against an already running `frontend-mocks` dev server.
+      reuseExistingServer: Boolean(process.env.E2E_REUSE_MOCKS),
       timeout: 180_000,
     },
   ],

@@ -1,0 +1,9 @@
+{
+  "merchant_id": "M002",
+  "shop_name": "Ameerpet Electronics",
+  "shop_description": "Ameerpet Electronics is on SP Road, Bengaluru, with phones, audio gear, accessories, and small appliances in its catalog. Customers can compare listed models and features for personal devices and common home use. Hermion should use recorded product details to explain options and confirm compatibility only when the catalog supports it.",
+  "negotiation_instructions": "Ask what the customer needs from the device or appliance and which listed features matter most. Explain specifications and compatibility only when they are recorded for the product. Hold the first price, then make gradual engine-approved counters. Suggest a related accessory or upgrade when the catalog links one and it fits the request, but accept a no promptly. Do not invent a discount, warranty, bundle, or compatibility claim. Ask you to step in only for a close offer from a keen buyer.",
+  "qr_token": "hermion-m002-demo",
+  "escalation": "rare",
+  "escalation_gap_pct": 6
+}

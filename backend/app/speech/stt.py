@@ -72,6 +72,8 @@ class SarvamRealtimeSTT:
             "mode": self._mode,
             "stream_type": "fast",
             "sample_rate": SAMPLE_RATE,
+            "endpointing": "vad",
+            "silence_duration_ms": 900,
             "encoding": "linear16",
         }
         return f"{SARVAM_WS}/speech-to-text-realtime/ws?{urlencode(query)}"

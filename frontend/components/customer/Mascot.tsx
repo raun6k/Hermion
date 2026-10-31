@@ -1,7 +1,8 @@
+import { useState } from "react";
+import Image from "next/image";
 import type { AgentState } from "@/lib/types";
 
-// CSS/SVG robot fallback (Q14). Reacts only to `agent_state`; image assets (public/mascot/<state>.webp)
-// can replace the face later without touching callers.
+// Mascot reacts only to agent_state; the inline SVG remains available if an asset fails to load.
 const GLOW: Record<AgentState, string> = {
   idle: "#f9a8d4",
   listening: "#60a5fa",
@@ -30,12 +31,18 @@ function Eyes({ state }: { state: AgentState }) {
   );
 }
 
-export function Mascot({ state }: { state: AgentState }) {
+export function Mascot({ state, label, compact = false }: { state: AgentState; label?: string; compact?: boolean }) {
+  const [failedState, setFailedState] = useState<AgentState | null>(null);
   const glow = GLOW[state];
   const bars = state === "listening" || state === "speaking";
   return (
-    <div className="relative mx-auto h-52 w-52" data-testid="mascot" data-state={state} role="img" aria-label={`Hermion is ${state}`}>
-      <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible">
+    <div className={`relative mx-auto transition-[width,height] duration-300 ${compact ? "h-28 w-28" : "h-52 w-52"}`} data-testid="mascot" data-state={state} role="img" aria-label={label ?? `Hermion is ${state}`}>
+      {failedState !== state ? (
+        <>
+          <div aria-hidden className="absolute inset-6 rounded-full border border-pink-200/40 bg-pink-300/10" />
+          <Image src={`/mascot/${state}.webp`} width={208} height={208} alt="" onError={() => setFailedState(state)} className="relative h-full w-full object-contain motion-safe:transition-transform motion-safe:duration-300" />
+        </>
+      ) : <svg viewBox="0 0 200 200" className="h-full w-full overflow-visible">
         {/* glowing rings */}
         <circle cx="100" cy="100" r="86" fill={glow} opacity="0.18" />
         <circle cx="100" cy="100" r="70" fill="none" stroke={glow} strokeWidth="2" opacity="0.6" />
@@ -91,7 +98,7 @@ export function Mascot({ state }: { state: AgentState }) {
             ))}
           </g>
         )}
-      </svg>
+      </svg>}
     </div>
   );
 }

@@ -1,6 +1,8 @@
 """Async trace translation to the merchant's language (Mayura). Spec: docs/voice.md."""
 
 import logging
+import re
+from collections import Counter
 from typing import Protocol
 
 import httpx
@@ -14,6 +16,22 @@ log = logging.getLogger(__name__)
 TRANSLATE_URL = "https://api.sarvam.ai/translate"
 MODEL = "mayura:v1"  # covers every language in app/languages.py
 MAX_CHARS = 1000  # per request
+
+
+# Keep unambiguous amounts and conventional apparel size labels intact in a translated trace.
+# If the provider rewrites them, the original is safer than a plausible but wrong translation.
+_CRITICAL_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9])(?:XXXL|XXL|XL|XS|S|M|L)(?![A-Za-z0-9])|[₹]?[0-9][0-9,]*(?:\.[0-9]+)?"
+)
+
+
+def preserves_critical_tokens(original: str, translated: str) -> bool:
+    def tokens(text: str) -> Counter[str]:
+        return Counter(t.replace(",", "").lstrip("₹") for t in _CRITICAL_TOKEN.findall(text))
+
+    expected = tokens(original)
+    observed = tokens(translated)
+    return all(observed[token] >= count for token, count in expected.items())
 
 
 class Translator(Protocol):

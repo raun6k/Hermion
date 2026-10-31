@@ -5,11 +5,12 @@ import type { Goal, MerchantProfile, Product } from "@/lib/types";
 export const MERCHANT: MerchantProfile = {
   merchant_id: "M001",
   shop_name: "Lakshmi Fashions",
-  shop_description: "Men's and women's everyday clothing and accessories in Ameerpet, Hyderabad",
+  shop_description: "Lakshmi Fashions sells everyday clothing and accessories near Jayanagar 4th Block, Bengaluru. Its catalog includes cotton shirts, kurtas, sarees, and leather belts in selected sizes and colours. Customers can compare fabric, fit, listed care details, and options for work, daily wear, family occasions, or gifting.",
   languages: ["hi-IN", "te-IN", "kn-IN", "en-IN"],
-  negotiation_instructions: "Hold the price at first. Suggest quantity deals. Always be polite and warm.",
-  bundle_allowed: true,
+  negotiation_instructions: "Start by understanding the occasion, preferred fit or colour, and quantity. Explain only facts in the catalog, especially fabric, fit, care details where listed, and available sizes. Make measured counters using engine prices, and consider quantity offers or listed shirt-and-belt pairings when they fit the customer's request. Keep the tone warm and patient; ask before suggesting an alternative and stop if it is declined. Never promise a price, stock, or product detail the catalog does not support.",
   qr_token: "hermion-m001-demo",
+  escalation: "serious",
+  escalation_gap_pct: 5,
 };
 
 type Row = [string, string, string, Record<string, string>, string[], number, number | null, number, number, number, boolean];
@@ -30,8 +31,16 @@ const rows: Row[] = [
 
 const m = (n: number) => n.toFixed(2);
 
+const PITCH: Record<string, { pitch: string; selling_points: string[]; best_for: string[] }> = {
+  shirts: { pitch: "Soft everyday cotton shirt that stays crisp through a full workday.", selling_points: ["100% cotton, breathable in the heat", "Double-stitched seams"], best_for: ["office wear"] },
+  belts: { pitch: "Genuine leather belt for formal and casual wear.", selling_points: ["Genuine leather", "Sturdy metal buckle"], best_for: ["office wear", "gifting"] },
+  kurtas: { pitch: "Festive-ready cotton kurta in a rich maroon.", selling_points: ["Comfortable all day", "Rich maroon colour"], best_for: ["festivals", "weddings"] },
+};
+
 export function seedProducts(): Product[] {
   return rows.map(([id, name, category, attributes, aliases, listed, target, minimum, cost, stock, negotiable]) => ({
+    ...(PITCH[category] ?? {}),
+    specs: {},
     product_id: id,
     merchant_id: "M001",
     product_name: name,

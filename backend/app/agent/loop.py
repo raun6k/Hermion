@@ -27,11 +27,21 @@ async def run_turn(llm: LLMClient, customer_text: str) -> str:
 
 
 async def run_tool_loop(
-    llm, messages, tools, dispatch, allowed, fallback=FALLBACK_REPLY, valid=lambda _: True, on_fallback=None
+    llm,
+    messages,
+    tools,
+    dispatch,
+    allowed,
+    fallback=FALLBACK_REPLY,
+    valid=lambda _: True,
+    on_fallback=None,
+    specs=frozenset(),
+    session_id=None,
 ):
     """Run at most three sequential tools and guard the final customer reply.
 
-    The caller supplies the dispatcher and refreshes the allowed amounts after each tool.
+    The caller supplies the dispatcher and refreshes the allowed amounts after each tool. `specs` are the
+    product measurements ("5000 mAh") the guard may let through as facts, not prices.
     """
     import json
 
@@ -39,7 +49,8 @@ async def run_tool_loop(
 
     messages = list(messages)
 
-    def use_fallback():
+    def use_fallback(reason):
+        log.warning("agent fallback session=%s reason=%s", session_id, reason)
         if on_fallback:
             on_fallback()
         return fallback
@@ -50,10 +61,10 @@ async def run_tool_loop(
             response = await llm.complete(messages, tools=tools() if callable(tools) else tools)
         except LLMError:
             log.exception("llm call failed")
-            return use_fallback()
+            return use_fallback("llm_error")
         if response.tool_calls:
             if step == 3:
-                return use_fallback()
+                return use_fallback("tool_limit")
             call = response.tool_calls[0]
             messages.append(
                 {
@@ -80,8 +91,8 @@ async def run_tool_loop(
             continue
         reply = (response.text or "").strip()
         if not reply:
-            return use_fallback()
-        if not check_reply(reply, allowed()) and valid(reply):
+            return use_fallback("empty_reply")
+        if not check_reply(reply, allowed(), specs) and valid(reply):
             return reply
         messages.append({"role": "assistant", "content": reply})
         messages.append(
@@ -94,13 +105,13 @@ async def run_tool_loop(
             retry = await llm.complete(messages, tools=tools() if callable(tools) else tools)
         except LLMError:
             log.exception("llm regeneration failed")
-            return use_fallback()
+            return use_fallback("regeneration_error")
         reply = (retry.text or "").strip()
-        if reply and not retry.tool_calls and not check_reply(reply, allowed()) and valid(reply):
+        if reply and not retry.tool_calls and not check_reply(reply, allowed(), specs) and valid(reply):
             return reply
         if latest_price is not None:
             template = f"The price is ₹{latest_price}."
             if not check_reply(template, allowed()) and valid(template):
                 return template
-        return use_fallback()
-    return use_fallback()
+        return use_fallback("regeneration_invalid")
+    return use_fallback("tool_limit")

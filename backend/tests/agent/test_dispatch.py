@@ -43,12 +43,17 @@ def test_dispatch_walks_the_demo(reseed) -> None:
             "error"
         ] == "INVALID_ARGUMENTS"
         assert (await dispatch(ctx, "add_to_basket", {"evaluation_id": r["evaluation_id"]})) == {
-            "error": "EVALUATION_NOT_ACCEPTED"
+            "error": "CUSTOMER_CONFIRMATION_REQUIRED"
         }
 
         ok = await dispatch(
             ctx, "evaluate_offer", {"items": [{"product_id": "SHIRT-BLU-M"}], "offered_amount": "1000"}
         )
+        # consent is server-side state: one clear customer yes grants the add (services/consent.py)
+        session = await sessions.get_session(db, sid)
+        assert session.consent["stage"] == "awaiting"
+        session.consent = {**session.consent, "stage": "granted"}
+        await db.commit()
         added = await dispatch(ctx, "add_to_basket", {"evaluation_id": ok["evaluation_id"]})
         assert added == {
             "basket": [

@@ -42,6 +42,7 @@ def test_reconnect_replays_everything(client: TestClient, reseed) -> None:
                     "product_name": "Men's cotton shirt, blue",
                     "qty": 1,
                     "line_total": "1000.00",
+                    "listed_total": "1000.00",
                 }
             ],
             "total": "1000.00",

@@ -6,5 +6,5 @@ COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 EXPOSE 8000
-# Migrate + seed on start so a clean clone works with one command.
-CMD ["sh", "-c", "alembic upgrade head && python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Apply schema changes on start. Load demo data explicitly with `make seed` so restarts preserve live sessions.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

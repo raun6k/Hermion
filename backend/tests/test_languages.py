@@ -5,7 +5,15 @@ import pytest
 from pydantic import ValidationError
 
 from app import languages
+from app.agent.language import matches_language_script
 from app.schemas.merchant import MerchantPatch
+
+
+def test_script_validation_allows_catalog_product_names_in_marathi() -> None:
+    names = ["Men's cotton shirt, blue"]
+    assert matches_language_script("हो, men's cotton shirt आहे. कोणता रंग हवा?", "mr-IN", names)
+    assert not matches_language_script("Yes, the men's cotton shirt is available.", "mr-IN", names)
+    assert not matches_language_script("Hello, how can I help?", "mr-IN", names)
 
 
 def test_registry_is_consistent() -> None:
