@@ -16,12 +16,12 @@ export default defineConfig({
   workers: 1, // one shared backend/test DB
   use: { viewport: { width: 1440, height: 900 } },
   projects: [
-    { name: "backend", testMatch: /skeleton\.spec\.ts|merchant\.spec\.ts/, use: { ...desktop, baseURL: `http://localhost:${WEB_PORT}` } },
+    { name: "backend", testMatch: /skeleton\.spec\.ts|merchant\.spec\.ts|text-demo\.spec\.ts/, use: { ...desktop, baseURL: `http://localhost:${WEB_PORT}` } },
     { name: "mocks", testMatch: /mock-demo\.spec\.ts/, use: { ...desktop, baseURL: `http://localhost:${MOCK_PORT}` } },
   ],
   webServer: [
     {
-      command: `uv run sh -c "alembic upgrade head && python -m app.seed && uvicorn app.main:app --port ${API_PORT}"`,
+      command: `uv run sh -c "alembic upgrade head && python -m app.seed && uvicorn scripts.e2e_server:app --port ${API_PORT}"`,
       cwd: "../backend",
       url: `http://localhost:${API_PORT}/livez`,
       env: {

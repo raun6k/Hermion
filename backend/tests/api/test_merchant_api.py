@@ -223,3 +223,39 @@ def test_search_products(client: TestClient) -> None:
 @pytest.mark.parametrize("path", ["/merchant/sessions?scope=bogus"])
 def test_bad_scope_is_validation_error(client: TestClient, path: str) -> None:
     assert client.get(path).status_code == 422
+
+
+def test_private_briefing_proposes_mandate(client: TestClient, reseed) -> None:
+    from app.agent.llm_client import FakeLLMClient, LLMResponse, ToolCall
+
+    sid = _new_session(client)
+    _pending_basket(sid)
+    assert (
+        client.post(f"/merchant/sessions/{sid}/review", json={"action": "renegotiate_hermion"}).status_code
+        == 200
+    )
+    client.app.state.llm = FakeLLMClient(
+        [
+            LLMResponse(
+                text=None,
+                tool_calls=[
+                    ToolCall(
+                        "1", "propose_mandate", {"rules": [{"product_id": "SHIRT-BLU-M", "settle_at": "850"}]}
+                    )
+                ],
+            ),
+            LLMResponse(text="Please confirm the ₹850 proposal."),
+        ]
+    )
+    response = client.post(f"/merchant/sessions/{sid}/briefing", json={"text": "Offer the shirt for 850"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["proposed_mandate"]["confirmed"] is False
+    assert body["proposed_mandate"]["rules"][0]["settle_at"] == "850.00"
+    trace_body = client.get(f"/merchant/sessions/{sid}").json()
+    assert [m["channel"] for m in trace_body["messages"]] == ["briefing", "briefing"]
+    mandate_id = body["proposed_mandate"]["mandate_id"]
+    assert (
+        client.post(f"/merchant/sessions/{sid}/mandates/{mandate_id}/confirm").json()["state"]
+        == "negotiating"
+    )

@@ -142,10 +142,28 @@ class MandateProposal(Schema):
     confirmed: bool = False
 
 
+class TraceToolCall(Schema):
+    id: UUID
+    channel: str
+    name: str
+    arguments: dict[str, Any]
+    result: dict[str, Any]
+    created_at: datetime
+
+
+class TraceStateChange(Schema):
+    id: UUID
+    from_state: str
+    to_state: str
+    created_at: datetime
+
+
 class SessionTrace(Schema):
     session: SessionSummary
     messages: list[TraceMessage]
     offers: list[TraceOffer]
+    tool_calls: list[TraceToolCall]
+    state_changes: list[TraceStateChange]
     basket: MerchantBasket | None
     mandate: MandateProposal | None
 

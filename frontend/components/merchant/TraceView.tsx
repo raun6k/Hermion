@@ -70,6 +70,25 @@ export function TraceView({ sessionId, version, products }: { sessionId: string;
           ),
         )}
       </ol>
+      {trace.state_changes.length > 0 && (
+        <details className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+          <summary className="cursor-pointer font-semibold">Session history ({trace.state_changes.length})</summary>
+          <ol className="mt-2 space-y-1 text-xs">
+            {trace.state_changes.map((change) => <li key={change.id}>{hhmm(change.created_at)} · {change.from_state} → {change.to_state}</li>)}
+          </ol>
+        </details>
+      )}
+      {trace.tool_calls.length > 0 && (
+        <details className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+          <summary className="cursor-pointer font-semibold">Tool activity ({trace.tool_calls.length})</summary>
+          <ol className="mt-2 space-y-2">
+            {trace.tool_calls.map((call) => <li key={call.id} className="break-words text-xs">
+              <span className="font-semibold">{call.name}</span> · {call.channel} · {hhmm(call.created_at)}
+              <pre className="mt-1 whitespace-pre-wrap">{JSON.stringify({ arguments: call.arguments, result: call.result }, null, 2)}</pre>
+            </li>)}
+          </ol>
+        </details>
+      )}
       {trace.mandate && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm">
           <p className="font-medium text-violet-900">Mandate {trace.mandate.confirmed ? "(confirmed)" : "(proposed)"}</p>

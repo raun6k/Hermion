@@ -26,14 +26,14 @@ export function Sessions({
   const past = sessions.length - live;
 
   return (
-    <div className="grid h-[24rem] shrink-0 grid-cols-[260px_1fr] gap-4" data-testid="sessions">
+    <div className="grid min-h-[28rem] shrink-0 grid-cols-1 grid-rows-[auto_minmax(16rem,1fr)] gap-4 md:grid-cols-[minmax(175px,240px)_1fr] md:grid-rows-1" data-testid="sessions">
       <div className="min-h-0 space-y-2 overflow-y-auto">
         <div className="flex gap-1 text-sm">
           {(["live", "past"] as const).map((s) => (
             <button
               key={s}
               onClick={() => setScope(s)}
-              className={`rounded-full px-3 py-1 ${scope === s ? "bg-sky-700 text-white" : "bg-white text-slate-600 ring-1 ring-sky-200"}`}
+              className={`rounded-full px-3 py-1 ${scope === s ? "bg-[#071f5c] text-white" : "bg-white text-slate-600 ring-1 ring-sky-200"}`}
               data-testid={`scope-${s}`}
             >
               {s === "live" ? `● live (${live})` : `○ past (${past})`}
@@ -46,7 +46,7 @@ export function Sessions({
             <li key={s.session_id}>
               <button
                 onClick={() => onSelect(s.session_id)}
-                className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${selected === s.session_id ? "border-sky-400 bg-sky-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${selected === s.session_id ? "border-pink-200 bg-pink-100" : "border-slate-200 bg-white hover:bg-slate-50"}`}
                 data-testid="session-row"
                 data-state={s.state}
               >
@@ -63,11 +63,17 @@ export function Sessions({
           ))}
         </ul>
       </div>
-      <div className="min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+      <div className="min-h-0 overflow-y-auto rounded-2xl bg-white">
         {selected ? (
           <TraceView sessionId={selected} version={versions[selected] ?? 0} products={products} />
         ) : (
-          <p className="p-4 text-sm text-slate-400">Select a session to see its trace. Nothing here interrupts you; only a basket for review does.</p>
+          <div className="flex h-full min-h-64 flex-col items-center justify-center px-8 text-center">
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-sky-100 text-pink-600" aria-hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-8 w-8"><path d="M5 8h14l1 12H4L5 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
+            </div>
+            <h2 className="text-xl font-bold text-[#071844]">Your shop is ready</h2>
+            <p className="mt-2 max-w-xs text-sm leading-6 text-[#415981]">Select a session to follow the conversation. A basket will appear here when it needs your decision.</p>
+          </div>
         )}
       </div>
     </div>

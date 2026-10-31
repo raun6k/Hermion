@@ -122,10 +122,17 @@ export interface MandateProposal {
   limited_product_ids: string[];
   confirmed: boolean;
 }
+export interface TraceToolCall {
+  id: string; channel: "customer" | "briefing"; name: string;
+  arguments: Record<string, unknown>; result: Record<string, unknown>; created_at: string;
+}
+export interface TraceStateChange { id: string; from_state: SessionState; to_state: SessionState; created_at: string }
 export interface SessionTrace {
   session: SessionSummary;
   messages: TraceMessage[];
   offers: TraceOffer[];
+  tool_calls: TraceToolCall[];
+  state_changes: TraceStateChange[];
   basket: MerchantBasket | null;
   mandate: MandateProposal | null;
 }
@@ -165,6 +172,7 @@ export type MerchantOutbound =
   | { type: "session_state"; session_id: string; state: SessionState }
   | { type: "trace"; session_id: string; kind: "message"; data: TraceMessage }
   | { type: "trace"; session_id: string; kind: "offer"; data: TraceOffer }
+  | { type: "trace"; session_id: string; kind: "tool_call"; data: TraceToolCall }
   | { type: "trace"; session_id: string; kind: "basket"; data: { action: string; basket: MerchantBasket } & Record<string, unknown> }
   | { type: "trace"; session_id: string; kind: "mandate"; data: { action: "proposed" | "confirmed"; mandate: MandateProposal } }
   | { type: "deal_request"; session_id: string; basket: MerchantBasket };

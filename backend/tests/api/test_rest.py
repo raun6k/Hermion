@@ -44,10 +44,8 @@ def test_validation_uses_error_envelope(client: TestClient) -> None:
 
 
 def test_unbuilt_routes_return_501(client: TestClient) -> None:
-    sid = uuid.uuid4()
     for method, path, body in [
         ("get", "/merchant/stats", None),  # Stage 3
-        ("post", f"/merchant/sessions/{sid}/briefing", {"text": "hi"}),  # Stage 2
     ]:
         r = getattr(client, method)(path, **({"json": body} if body else {}))
         assert r.status_code == 501, path

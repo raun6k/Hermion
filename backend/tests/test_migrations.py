@@ -7,7 +7,18 @@ from alembic import command
 from app.config import get_settings
 from tests.conftest import _seed, alembic_config
 
-TABLES = {"merchants", "products", "goals", "sessions", "messages", "offers", "basket_lines", "mandates"}
+TABLES = {
+    "merchants",
+    "products",
+    "goals",
+    "sessions",
+    "messages",
+    "offers",
+    "basket_lines",
+    "mandates",
+    "tool_calls",
+    "state_changes",
+}
 
 
 async def _tables() -> set[str]:

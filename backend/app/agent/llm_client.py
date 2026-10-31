@@ -81,10 +81,13 @@ class OpenRouterClient:
         if not resp.choices:
             raise LLMError("empty response")
         msg = resp.choices[0].message
-        calls = [
-            ToolCall(id=c.id, name=c.function.name, arguments=json.loads(c.function.arguments or "{}"))
-            for c in (msg.tool_calls or [])
-        ]
+        try:
+            calls = [
+                ToolCall(id=c.id, name=c.function.name, arguments=json.loads(c.function.arguments or "{}"))
+                for c in (msg.tool_calls or [])
+            ]
+        except (ValueError, TypeError) as exc:
+            raise LLMError("invalid tool arguments") from exc
         log.info("llm model=%s latency_ms=%d tool_calls=%d", resp.model, latency_ms, len(calls))
         return LLMResponse(
             text=msg.content, tool_calls=calls, model=resp.model or self._model, latency_ms=latency_ms

@@ -3,7 +3,7 @@ import type { AgentState } from "@/lib/types";
 // CSS/SVG robot fallback (Q14). Reacts only to `agent_state`; image assets (public/mascot/<state>.webp)
 // can replace the face later without touching callers.
 const GLOW: Record<AgentState, string> = {
-  idle: "#93c5fd",
+  idle: "#f9a8d4",
   listening: "#60a5fa",
   thinking: "#f9a8d4",
   speaking: "#f9a8d4",
@@ -56,8 +56,8 @@ export function Mascot({ state }: { state: AgentState }) {
           {/* antenna + head */}
           <line x1="100" y1="42" x2="100" y2="58" stroke="#475569" strokeWidth="4" />
           <circle cx="100" cy="38" r="6" fill={glow} />
-          <rect x="44" y="58" width="112" height="92" rx="30" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="3" />
-          <rect x="54" y="70" width="92" height="62" rx="20" fill="#1e293b" />
+          <rect x="44" y="58" width="112" height="92" rx="30" fill="#101d3f" stroke="#7187b7" strokeWidth="3" />
+          <rect x="54" y="70" width="92" height="62" rx="20" fill="#050b1d" />
           <Eyes state={state} />
           {state === "negotiating" && (
             <g clipPath="url(#face)">

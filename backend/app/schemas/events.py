@@ -110,7 +110,7 @@ class SessionStateEvent(Schema):
 class TraceEvent(Schema):
     type: Literal["trace"] = "trace"
     session_id: UUID
-    kind: Literal["message", "offer", "basket", "mandate"]
+    kind: Literal["message", "offer", "basket", "mandate", "tool_call"]
     data: dict[str, Any]
 
 

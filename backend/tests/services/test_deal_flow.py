@@ -51,6 +51,20 @@ def test_worked_example_and_basket(reseed) -> None:
     run_db(go)
 
 
+def test_exhaustion_recovers_previous_counter_from_history(reseed) -> None:
+    async def go(db):
+        hubs = new_hubs()
+        sid = await _start(db, hubs)
+        for _ in range(3):
+            await _offer(db, hubs, sid, SHIRT, 700)
+        prior = await _offer(db, hubs, sid, SHIRT, 700, buy_now=True)
+        assert (prior["decision"], prior["price"]) == ("counter", "780")
+        result = await _offer(db, hubs, sid, SHIRT, 700)
+        assert (result["reason_code"], result["price"], result["round"]) == ("ROUNDS_EXHAUSTED", "780", 5)
+
+    run_db(go)
+
+
 def test_basket_takes_only_accepted_and_one_line_per_product(reseed) -> None:
     async def go(db):
         hubs = new_hubs()

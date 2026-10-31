@@ -125,6 +125,10 @@ def evaluate_offer(
         return _reject(ReasonCode.BUNDLE_NOT_ALLOWED)
     if (code := _validate(products, items)) is not None:
         return _reject(code)
+    listed_total = sum((products[i.product_id].listed_price * i.qty for i in items), Decimal(0))
+    raw_total = offered_amount * items[0].qty if scope is OfferScope.per_unit else offered_amount
+    if raw_total > listed_total:
+        return _reject(ReasonCode.OFFER_ABOVE_LISTED)
     offered = floor_to_rupee(offered_amount)
     if offered < 1:
         return _reject(ReasonCode.INVALID_OFFER)
@@ -142,7 +146,7 @@ def evaluate_offer(
     common = {"round": rnd, "threshold": total_t, "signals": signals, "mandate_applied": mandate}
 
     if offered >= total_t:
-        price = min(offered, total_listed)
+        price = offered
         return Evaluation(
             Decision.accept,
             ReasonCode.ACCEPTABLE,
@@ -173,6 +177,37 @@ def evaluate_offer(
             line_prices=prices,
             **common,
         )
+    previous = ctx.last_counter
+    current_terms = {line.item.product_id: line for line in lines}
+    expected = {(item.product_id, item.qty) for item in items}
+    valid = len(previous) == len(items) and {(p.product_id, p.qty) for p in previous} == expected
+    if valid:
+        valid = all(
+            products[p.product_id].minimum_price * p.qty
+            <= p.line_total
+            <= products[p.product_id].listed_price * p.qty
+            and (
+                products[p.product_id].negotiable
+                or p.line_total == products[p.product_id].listed_price * p.qty
+            )
+            and (
+                p.product_id not in ctx.preserve_stock
+                or p.line_total >= ceil_to_rupee(effective_target(products[p.product_id])) * p.qty
+            )
+            and (
+                not current_terms[p.product_id].mandate_applied
+                or p.line_total >= current_terms[p.product_id].threshold * p.qty
+            )
+            for p in previous
+        )
+    prior_total = sum((p.line_total for p in previous), Decimal(0))
+    if not valid or prior_total < offered:
+        return Evaluation(Decision.reject, ReasonCode.ROUNDS_EXHAUSTED, final=True, **common)
     return Evaluation(
-        Decision.reject, ReasonCode.ROUNDS_EXHAUSTED, final=True, price=counter, line_prices=prices, **common
+        Decision.reject,
+        ReasonCode.ROUNDS_EXHAUSTED,
+        final=True,
+        price=prior_total,
+        line_prices=previous,
+        **common,
     )

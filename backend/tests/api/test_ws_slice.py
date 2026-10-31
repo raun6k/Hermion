@@ -36,20 +36,29 @@ def test_customer_text_round_trip(client: TestClient) -> None:
             assert customer.receive_json() == {"type": "agent_state", "state": "idle"}
 
             customer.send_json({"type": "text_input", "text": "Namaskaram"})
-            events = [customer.receive_json() for _ in range(4)]
-            assert [e["type"] for e in events] == ["transcript", "agent_state", "transcript", "agent_state"]
+            events = [customer.receive_json() for _ in range(5)]
+            assert [e["type"] for e in events] == [
+                "transcript",
+                "agent_state",
+                "state",
+                "transcript",
+                "agent_state",
+            ]
             assert events[0] == {
                 "type": "transcript",
                 "speaker": "customer",
                 "text": "Namaskaram",
                 "final": True,
             }
-            assert events[2]["speaker"] == "hermion" and "Namaskaram" in events[2]["text"]
+            assert events[2]["state"] == "discovery"
+            assert events[3]["speaker"] == "hermion" and "Namaskaram" in events[3]["text"]
 
             customer.send_json({"type": "bogus"})
             assert customer.receive_json()["code"] == "INVALID_EVENT"
 
-        traces = [merchant.receive_json() for _ in range(2)]
+        merchant_events = [merchant.receive_json() for _ in range(3)]
+        assert merchant_events[1]["type"] == "session_state"
+        traces = [merchant_events[0], merchant_events[2]]
         assert [t["data"]["speaker"] for t in traces] == ["customer", "hermion"]
         assert all(t["type"] == "trace" and t["session_id"] == sid for t in traces)
 

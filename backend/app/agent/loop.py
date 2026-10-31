@@ -1,8 +1,4 @@
-"""Agent turn loop. Walking skeleton: one plain LLM call, no tools, no state machine.
-
-Real loop (docs/engine.md#agent-loop): system prompt + state block + last 10 messages,
-<= 3 tool calls one at a time, output guard, failure templates.
-"""
+"""Customer tool loop and legacy greeting runner used by the Stage 1 evaluation harness."""
 
 import logging
 
@@ -28,3 +24,77 @@ async def run_turn(llm: LLMClient, customer_text: str) -> str:
         log.exception("llm call failed")
         return FALLBACK_REPLY
     return (resp.text or "").strip() or FALLBACK_REPLY
+
+
+async def run_tool_loop(
+    llm, messages, tools, dispatch, allowed, fallback=FALLBACK_REPLY, valid=lambda _: True
+):
+    """Run at most three sequential tools and guard the final customer reply.
+
+    The caller supplies the dispatcher and refreshes the allowed amounts after each tool.
+    """
+    import json
+
+    from app.agent.guard import check_reply
+
+    messages = list(messages)
+    latest_price = None
+    for step in range(4):
+        try:
+            response = await llm.complete(messages, tools=tools() if callable(tools) else tools)
+        except LLMError:
+            log.exception("llm call failed")
+            return fallback
+        if response.tool_calls:
+            if step == 3:
+                return fallback
+            call = response.tool_calls[0]
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": response.text,
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": json.dumps(call.arguments, ensure_ascii=False),
+                            },
+                        }
+                    ],
+                }
+            )
+            result = await dispatch(call.name, call.arguments)
+            if call.name in {"evaluate_offer", "suggest_bundle"}:
+                latest_price = result.get("price") or result.get("bundle_price")
+            messages.append(
+                {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result, ensure_ascii=False)}
+            )
+            continue
+        reply = (response.text or "").strip()
+        if not reply:
+            return fallback
+        if not check_reply(reply, allowed()) and valid(reply):
+            return reply
+        messages.append({"role": "assistant", "content": reply})
+        messages.append(
+            {
+                "role": "user",
+                "content": "Please restate that in the pinned language and do not use unverified prices.",
+            }
+        )
+        try:
+            retry = await llm.complete(messages, tools=tools() if callable(tools) else tools)
+        except LLMError:
+            log.exception("llm regeneration failed")
+            return fallback
+        reply = (retry.text or "").strip()
+        if reply and not retry.tool_calls and not check_reply(reply, allowed()) and valid(reply):
+            return reply
+        if latest_price is not None:
+            template = f"The price is ₹{latest_price}."
+            if not check_reply(template, allowed()) and valid(template):
+                return template
+        return fallback
+    return fallback

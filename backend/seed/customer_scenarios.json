@@ -3,7 +3,7 @@
     "scenario_id": "S01-happy-path",
     "merchant_id": "M001",
     "language": "te-IN",
-    "messages": ["Namaskaram, naaku oka shirt kavali", "Naa kosame, size M", "700 ki istara?", "750", "800 ki teesukuntanu, ippude"],
+    "messages": ["Namaskaram, naaku oka neeli shirt kavali", "Naa kosame, size M", "700 ki istara?", "750", "800 ki teesukuntanu, ippude"],
     "hidden_budget": "820",
     "tags": ["demo"]
   },
@@ -94,7 +94,7 @@
     "language": "hi-IN",
     "channel": "briefing",
     "setup": "pending_basket",
-    "messages": ["Agar ye customer shirt 850 mein le, to belt 300 mein de do. Dono saath mein."],
+    "messages": ["Agar ye customer blue shirt M 850 mein le, to brown belt size 32 ko 300 mein de do. Dono saath mein."],
     "expect_mandate": [
       {"product_id": "SHIRT-BLU-M", "settle_at": "850", "with_product_id": "BELT-BRN-32"},
       {"product_id": "BELT-BRN-32", "settle_at": "300", "with_product_id": "SHIRT-BLU-M"}

@@ -77,14 +77,15 @@ export function MerchantPane() {
   }
 
   return (
-    <section className="relative flex h-full flex-col gap-3 overflow-hidden rounded-3xl bg-sky-50 p-6" data-testid="merchant-pane">
-      <header className="flex items-baseline justify-between">
+    <section className="relative flex min-h-[760px] flex-col gap-4 overflow-hidden rounded-[26px] bg-[#dff4fc] p-5 text-[#081b4d] sm:p-6 lg:h-full lg:min-h-0" data-testid="merchant-pane">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-sky-200/80 pb-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900" data-testid="shop-name">
+          <div className="flex items-center gap-2 text-3xl font-bold tracking-tight text-[#071844]"><svg aria-hidden viewBox="0 0 24 24" className="h-7 w-7 fill-pink-600"><path d="M12 1c1.1 6.2 3.8 8.9 11 11-7.2 2.1-9.9 4.8-11 11C10.9 16.8 8.2 14.1 1 12 8.2 9.9 10.9 7.2 12 1Z" /></svg>Hermion</div>
+          <h1 className="pl-8 text-sm font-medium text-[#253d70]" data-testid="shop-name">
             {shop?.shop_name ?? "Loading shop…"}
             {USE_MOCKS && <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 align-middle text-xs font-normal text-amber-800">mock data</span>}
           </h1>
-          <p className="text-sm text-slate-500">Merchant console · {products.length ? `${products.length} products in catalog` : "– products in catalog"}</p>
+          <p className="pl-8 text-xs text-[#415981]">Merchant console · {products.length ? `${products.length} products in catalog` : "– products in catalog"}</p>
         </div>
         {health && (
           <ul className="flex gap-2 text-xs" data-testid="health">
@@ -98,14 +99,14 @@ export function MerchantPane() {
       </header>
       {error && <p className="rounded bg-red-100 p-2 text-sm text-red-700">Backend error: {error}</p>}
 
-      <nav className="flex gap-1 border-b border-slate-200" role="tablist">
+      <nav className="flex gap-2 overflow-x-auto border-b border-sky-200/80" role="tablist">
         {TABS.map((t) => (
           <button
             key={t.id}
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === t.id ? "border-pink-500 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+            className={`-mb-px border-b-2 whitespace-nowrap px-4 py-3 text-sm font-semibold ${tab === t.id ? "border-pink-600 text-pink-700" : "border-transparent text-[#344b75] hover:text-[#071844]"}`}
             data-testid={`tab-${t.id}`}
           >
             {t.label}
@@ -116,7 +117,7 @@ export function MerchantPane() {
         ))}
       </nav>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-40 pr-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-4 pr-1">
         {tab === "catalog" && <Catalog products={products} onChange={setProducts} />}
         {tab === "shop" && shop && <Shop shop={shop} onSaved={setShop} products={products} />}
         {tab === "sessions" && (

@@ -30,6 +30,7 @@ class ReasonCode(StrEnum):
     UNKNOWN_PRODUCT = "UNKNOWN_PRODUCT"
     BUNDLE_NOT_ALLOWED = "BUNDLE_NOT_ALLOWED"
     INVALID_OFFER = "INVALID_OFFER"
+    OFFER_ABOVE_LISTED = "OFFER_ABOVE_LISTED"
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,13 @@ class MandateRule:
 
 
 @dataclass(frozen=True)
+class LinePrice:
+    product_id: str
+    qty: int
+    line_total: Decimal
+
+
+@dataclass(frozen=True)
 class NegotiationContext:
     """Session facts the services layer derives from the DB before each evaluation."""
 
@@ -68,14 +76,7 @@ class NegotiationContext:
     preserve_stock: frozenset[str] = frozenset()
     mandate_rules: tuple[MandateRule, ...] = ()
     bundle_allowed: bool = False
-    last_counters: dict[str, Decimal] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class LinePrice:
-    product_id: str
-    qty: int
-    line_total: Decimal
+    last_counter: tuple[LinePrice, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

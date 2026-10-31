@@ -492,6 +492,8 @@ export class MockBackend {
       session: this.summary(s),
       messages: s.messages.map((m) => ({ ...m })),
       offers: s.offers.map((o) => ({ ...o })),
+      tool_calls: [],
+      state_changes: [],
       basket: s.basket.length ? this.merchantBasket(s) : null,
       mandate: s.mandate,
     };

@@ -34,14 +34,14 @@ export function ShopQR({ token }: { token: string | null }) {
   const cells = useMemo(() => (token ? matrix(token) : null), [token]);
   return (
     <aside
-      className="pointer-events-none absolute bottom-4 right-4 w-44 rounded-xl border border-slate-200 bg-white p-3 shadow-lg"
+      className="pointer-events-none relative ml-auto w-36 shrink-0 rounded-xl bg-white p-3 shadow-sm"
       data-testid="shop-qr"
     >
       <p className="mb-2 text-center text-xs font-medium text-slate-700">Scan to bargain with Hermion</p>
       {cells ? (
         <svg
           viewBox={`0 0 ${SIZE} ${SIZE}`}
-          className="mx-auto h-32 w-32"
+          className="mx-auto h-24 w-24"
           shapeRendering="crispEdges"
           data-qr-target
           data-qr-token={token ?? ""}
@@ -52,7 +52,7 @@ export function ShopQR({ token }: { token: string | null }) {
           {cells.flatMap((row, y) => row.map((on, x) => (on ? <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill="#0f172a" /> : null)))}
         </svg>
       ) : (
-        <div className="mx-auto h-32 w-32 animate-pulse rounded bg-slate-100" />
+        <div className="mx-auto h-24 w-24 animate-pulse rounded bg-slate-100" />
       )}
     </aside>
   );

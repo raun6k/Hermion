@@ -6,7 +6,17 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import TERMINAL_STATES, BasketLine, Mandate, Message, Offer, Product, Session
+from app.db.models import (
+    TERMINAL_STATES,
+    BasketLine,
+    Mandate,
+    Message,
+    Offer,
+    Product,
+    Session,
+    StateChange,
+    ToolCallTrace,
+)
 from app.schemas.common import AppError
 from app.schemas.merchant import (
     MandateProposal,
@@ -17,6 +27,8 @@ from app.schemas.merchant import (
     SessionTrace,
     TraceMessage,
     TraceOffer,
+    TraceStateChange,
+    TraceToolCall,
 )
 from app.schemas.public import BasketLinePublic, BasketPublic
 
@@ -147,12 +159,24 @@ async def session_trace(db: AsyncSession, session_id: uuid.UUID) -> SessionTrace
     offers = await db.scalars(
         select(Offer).where(Offer.session_id == session_id).order_by(Offer.created_at, Offer.id)
     )
+    tool_calls = await db.scalars(
+        select(ToolCallTrace)
+        .where(ToolCallTrace.session_id == session_id)
+        .order_by(ToolCallTrace.created_at, ToolCallTrace.id)
+    )
+    changes = await db.scalars(
+        select(StateChange)
+        .where(StateChange.session_id == session_id)
+        .order_by(StateChange.created_at, StateChange.id)
+    )
     mandate = await latest_mandate(db, session_id)
     basket = await merchant_basket(db, session_id)
     return SessionTrace(
         session=await session_summary(db, session),
         messages=[TraceMessage.model_validate(m) for m in messages],
         offers=[TraceOffer.model_validate(o) for o in offers],
+        tool_calls=[TraceToolCall.model_validate(t) for t in tool_calls],
+        state_changes=[TraceStateChange.model_validate(c) for c in changes],
         basket=basket if basket.lines else None,
         mandate=mandate_proposal(mandate) if mandate else None,
     )

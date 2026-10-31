@@ -32,6 +32,10 @@ def test_dispatch_walks_the_demo(reseed) -> None:
             ctx, "evaluate_offer", {"items": [{"product_id": "SHIRT-BLU-M"}], "offered_amount": "700"}
         )
         assert (r["decision"], r["price"]) == ("counter", "950") and "threshold" not in r
+        above = await dispatch(
+            ctx, "evaluate_offer", {"items": [{"product_id": "SHIRT-BLU-M"}], "offered_amount": "5000"}
+        )
+        assert above == {"error": "OFFER_ABOVE_LISTED", "detail": "Ask the customer to clarify the offer."}
         assert await dispatch(
             ctx, "evaluate_offer", {"items": [{"product_id": "NOPE"}], "offered_amount": "700"}
         ) == {"error": "UNKNOWN_PRODUCT"}

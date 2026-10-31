@@ -1,9 +1,12 @@
 """Merchant REST (docs/api.md#rest-merchant). No auth in the MVP."""
 
+import asyncio
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
+from app.agent.briefing import handle_briefing
+from app.agent.customer import resume_customer
 from app.api.deps import DbDep, HubsDep
 from app.schemas.common import not_implemented
 from app.schemas.merchant import (
@@ -82,26 +85,39 @@ async def get_trace(session_id: UUID, db: DbDep) -> SessionTrace:
 
 
 @router.post("/sessions/{session_id}/review", response_model=ReviewResponse)
-async def review(session_id: UUID, body: ReviewRequest, db: DbDep, hubs: HubsDep) -> ReviewResponse:
-    session = await basket.review(db, hubs, session_id, body.action)
-    return ReviewResponse(state=session.state)
+async def review(
+    session_id: UUID, body: ReviewRequest, request: Request, db: DbDep, hubs: HubsDep
+) -> ReviewResponse:
+    async with request.app.state.turn_locks.setdefault(session_id, asyncio.Lock()):
+        session = await basket.review(db, hubs, session_id, body.action)
+        return ReviewResponse(state=session.state)
 
 
 @router.post("/sessions/{session_id}/briefing", response_model=BriefingResponse)
-async def briefing(session_id: UUID, body: BriefingRequest) -> BriefingResponse:
-    raise not_implemented("Briefing")  # Stage 2: agent/briefing.py
+async def briefing(
+    session_id: UUID, body: BriefingRequest, request: Request, db: DbDep, hubs: HubsDep
+) -> BriefingResponse:
+    lock = request.app.state.turn_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        return await handle_briefing(db, hubs, request.app.state.llm, session_id, body.text)
 
 
 @router.post("/sessions/{session_id}/mandates/{mandate_id}/confirm", response_model=MandateConfirmResponse)
 async def confirm_mandate(
-    session_id: UUID, mandate_id: UUID, db: DbDep, hubs: HubsDep
+    session_id: UUID, mandate_id: UUID, request: Request, db: DbDep, hubs: HubsDep
 ) -> MandateConfirmResponse:
-    return MandateConfirmResponse(state=await mandates.confirm(db, hubs, session_id, mandate_id))
+    async with request.app.state.turn_locks.setdefault(session_id, asyncio.Lock()):
+        state = await mandates.confirm(db, hubs, session_id, mandate_id)
+        await resume_customer(db, hubs, request.app.state.llm, session_id)
+        return MandateConfirmResponse(state=state)
 
 
 @router.put("/sessions/{session_id}/basket", response_model=MerchantBasket)
-async def edit_basket(session_id: UUID, body: BasketEdit, db: DbDep, hubs: HubsDep) -> MerchantBasket:
-    return await basket.edit_in_person(db, hubs, session_id, body.lines)
+async def edit_basket(
+    session_id: UUID, body: BasketEdit, request: Request, db: DbDep, hubs: HubsDep
+) -> MerchantBasket:
+    async with request.app.state.turn_locks.setdefault(session_id, asyncio.Lock()):
+        return await basket.edit_in_person(db, hubs, session_id, body.lines)
 
 
 @router.get("/stats", response_model=Stats)

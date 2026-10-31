@@ -14,7 +14,18 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import DatabaseSettings
-from app.db.models import BasketLine, Goal, Mandate, Merchant, Message, Offer, Product, Session
+from app.db.models import (
+    BasketLine,
+    Goal,
+    Mandate,
+    Merchant,
+    Message,
+    Offer,
+    Product,
+    Session,
+    StateChange,
+    ToolCallTrace,
+)
 from app.schemas.merchant import MerchantProfile
 
 SEED_DIR = Path(__file__).resolve().parents[1] / "seed"
@@ -54,7 +65,7 @@ async def seed(db: AsyncSession, seed_dir: Path = SEED_DIR) -> None:
 
     # Children first: wipe everything belonging to this merchant, then insert fresh.
     merchant_sessions = select(Session.session_id).where(Session.merchant_id == merchant.merchant_id)
-    for model in (BasketLine, Offer, Mandate, Message):
+    for model in (BasketLine, Offer, Mandate, Message, ToolCallTrace, StateChange):
         await db.execute(delete(model).where(model.session_id.in_(merchant_sessions)))
     await db.execute(delete(Session).where(Session.merchant_id == merchant.merchant_id))
     await db.execute(delete(Goal).where(Goal.merchant_id == merchant.merchant_id))

@@ -55,6 +55,7 @@ ERROR_REASONS = frozenset(
         ReasonCode.INSUFFICIENT_STOCK,
         ReasonCode.BUNDLE_NOT_ALLOWED,
         ReasonCode.INVALID_OFFER,
+        ReasonCode.OFFER_ABOVE_LISTED,
     }
 )
 
@@ -265,6 +266,8 @@ async def _run(ctx: ToolContext, name: str, arguments: dict[str, Any]) -> dict[s
                 args.buy_now,
             )
             if result["reason_code"] in ERROR_REASONS:
+                if result["reason_code"] == ReasonCode.OFFER_ABOVE_LISTED:
+                    return {"error": "OFFER_ABOVE_LISTED", "detail": "Ask the customer to clarify the offer."}
                 return {"error": result["reason_code"]}
             return result
         case "suggest_bundle":

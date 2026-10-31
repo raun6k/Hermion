@@ -90,15 +90,55 @@ def test_final_offer_then_rounds_exhausted() -> None:
         True,
         800,
     )
-    out = ev("SHIRT", 100, c=ctx(rounds={"SHIRT": 4}))
+    out = ev("SHIRT", 100, c=ctx(rounds={"SHIRT": 4}, last_counter=(LinePrice("SHIRT", 1, D(800)),)))
     assert (out.decision, out.reason_code, out.price) == (Decision.reject, ReasonCode.ROUNDS_EXHAUSTED, 800)
     # an offer at the threshold is still accepted after the rounds are used up
     assert ev("SHIRT", 800, c=ctx(rounds={"SHIRT": 9})).decision is Decision.accept
 
 
+def test_exhaustion_holds_previous_counter_when_signals_change() -> None:
+    prior = ev("SHIRT", 700, buy_now=True, c=ctx(rounds={"SHIRT": 3}))
+    assert prior.price == 780
+    result = ev("SHIRT", 700, c=ctx(rounds={"SHIRT": 4}, last_counter=prior.line_prices))
+    assert result.reason_code is ReasonCode.ROUNDS_EXHAUSTED
+    assert result.price == 780 and result.line_prices == prior.line_prices
+
+
+def test_exhaustion_omits_unavailable_or_invalid_previous_counter() -> None:
+    for prior in ((), (LinePrice("SHIRT", 2, D(780)),), (LinePrice("SHIRT", 1, D(700)),)):
+        result = ev("SHIRT", 100, c=ctx(rounds={"SHIRT": 4}, last_counter=prior))
+        assert result.reason_code is ReasonCode.ROUNDS_EXHAUSTED and result.price is None
+
+
+def test_exhaustion_does_not_reuse_counter_below_confirmed_mandate() -> None:
+    context = ctx(
+        rounds={"SHIRT": 4},
+        last_counter=(LinePrice("SHIRT", 1, D(780)),),
+        mandate_rules=(MandateRule("SHIRT", D(900)),),
+    )
+    result = ev("SHIRT", 700, c=context)
+    assert result.reason_code is ReasonCode.ROUNDS_EXHAUSTED and result.price is None
+
+
 def test_accept_never_below_customer_offer_or_above_listed() -> None:
     assert ev("SHIRT", 900, c=ctx(rounds={"SHIRT": 2})).price == 900
-    assert ev("SHIRT", 5000).price == 1000
+    result = ev("SHIRT", 5000)
+    assert (result.decision.value, result.reason_code.value, result.price, result.round) == (
+        "reject",
+        "OFFER_ABOVE_LISTED",
+        None,
+        0,
+    )
+
+
+def test_above_listed_in_each_scope() -> None:
+    for scope, items, amount in (
+        (OfferScope.per_unit, [OfferItem("SHIRT", 2)], D("1001")),
+        (OfferScope.line, [OfferItem("SHIRT", 2)], D("2001")),
+        (OfferScope.basket, [OfferItem("SHIRT", 1), OfferItem("BELT", 1)], D("1501")),
+    ):
+        result = evaluate_offer(CATALOG, items, amount, scope, False, ctx(bundle_allowed=True))
+        assert (result.reason_code.value, result.price, result.round) == ("OFFER_ABOVE_LISTED", None, 0)
 
 
 def test_offer_rounded_down_to_rupee() -> None:
@@ -156,7 +196,18 @@ def test_clear_stock_and_preserve_stock() -> None:
     assert ev("SHIRT", 100, c=ctx(clear_stock=frozenset({"SHIRT"}))).price == 900
     kept = ev("SHIRT", 100, c=ctx(rounds={"SHIRT": 3}, preserve_stock=frozenset({"SHIRT"})))
     assert kept.price == 800
-    assert ev("SHIRT", 100, c=ctx(rounds={"SHIRT": 6}, preserve_stock=frozenset({"SHIRT"}))).price == 800
+    assert (
+        ev(
+            "SHIRT",
+            100,
+            c=ctx(
+                rounds={"SHIRT": 6},
+                preserve_stock=frozenset({"SHIRT"}),
+                last_counter=(LinePrice("SHIRT", 1, D(800)),),
+            ),
+        ).price
+        == 800
+    )
 
 
 # ---- mandates ---------------------------------------------------------------------
@@ -300,10 +351,7 @@ def test_price_bounds_hold_for_any_input(s) -> None:
     assert r.price >= _min_total(prods, items)  # never below minimum
     assert r.price <= _listed_total(prods, items)  # never above listed
     if r.decision is not Decision.reject or r.reason_code is ReasonCode.ROUNDS_EXHAUSTED:
-        assert r.price >= min(
-            floor_to_rupee(offer) * (items[0].qty if scope is OfferScope.per_unit else 1),
-            _listed_total(prods, items),
-        )
+        assert r.price >= floor_to_rupee(offer) * (items[0].qty if scope is OfferScope.per_unit else 1)
     assert r.price == sum(lp.line_total for lp in r.line_prices)
 
 
@@ -324,7 +372,12 @@ def test_same_round_and_signals_give_same_counter_below_threshold(s, a, b) -> No
     prods, items, scope, _, buy_now, c = s
     first = evaluate_offer(prods, items, D(a), scope, buy_now, c)
     second = evaluate_offer(prods, items, D(b), scope, buy_now, c)
-    if first.decision is not Decision.accept and second.decision is not Decision.accept:
+    if (
+        first.round > 0
+        and second.round > 0
+        and first.decision is not Decision.accept
+        and second.decision is not Decision.accept
+    ):
         assert (first.price, first.reason_code, first.round) == (
             second.price,
             second.reason_code,

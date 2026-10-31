@@ -4,7 +4,7 @@ import { MerchantPane } from "@/components/merchant/MerchantPane";
 // One page, two panes (docs/frontend.md). Panes share no client state: each talks to the backend.
 export default function Home() {
   return (
-    <main className="grid h-screen min-w-[1280px] grid-cols-[65fr_35fr] gap-3 bg-black p-3">
+    <main className="grid min-h-screen grid-cols-1 gap-3 bg-black p-3 lg:h-screen lg:grid-cols-[minmax(0,65fr)_minmax(340px,35fr)]">
       <MerchantPane />
       <CustomerPane />
     </main>

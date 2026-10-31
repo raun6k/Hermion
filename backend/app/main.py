@@ -29,6 +29,8 @@ async def lifespan(app: FastAPI):
     app.state.merchant_hub = MerchantHub()
     app.state.customer_hub = CustomerHub()
     app.state.hubs = Hubs(app.state.merchant_hub, app.state.customer_hub)
+    app.state.turn_locks = {}
+    app.state.language_pins = {}
     log.info(
         "hermion backend up (llm=%s, fake_llm=%s, fake_speech=%s)",
         settings.llm_model,

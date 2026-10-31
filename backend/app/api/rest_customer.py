@@ -1,8 +1,9 @@
 """Customer REST (docs/api.md#rest-customer). Responses use schemas.public only."""
 
+import asyncio
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.deps import DbDep, HubsDep, MerchantHubDep
 from app.schemas.events import SessionCreatedEvent
@@ -33,12 +34,14 @@ async def get_session(session_id: UUID, db: DbDep) -> SessionPublic:
 
 
 @router.post("/{session_id}/confirm", response_model=ConfirmResponse)
-async def confirm(session_id: UUID, db: DbDep, hubs: HubsDep) -> ConfirmResponse:
-    session, public = await basket.confirm(db, hubs, session_id)
-    return ConfirmResponse(state=session.state, basket=public)
+async def confirm(session_id: UUID, request: Request, db: DbDep, hubs: HubsDep) -> ConfirmResponse:
+    async with request.app.state.turn_locks.setdefault(session_id, asyncio.Lock()):
+        session, public = await basket.confirm(db, hubs, session_id)
+        return ConfirmResponse(state=session.state, basket=public)
 
 
 @router.post("/{session_id}/exit", response_model=ExitResponse)
-async def exit_session(session_id: UUID, db: DbDep, hubs: HubsDep) -> ExitResponse:
-    session = await sessions.exit_session(db, hubs, session_id)
-    return ExitResponse(state=session.state)
+async def exit_session(session_id: UUID, request: Request, db: DbDep, hubs: HubsDep) -> ExitResponse:
+    async with request.app.state.turn_locks.setdefault(session_id, asyncio.Lock()):
+        session = await sessions.exit_session(db, hubs, session_id)
+        return ExitResponse(state=session.state)

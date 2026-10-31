@@ -61,3 +61,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .hm-ring, .hm-bar, .hm-orbit, .hm-dot, .hm-sparkle, .hm-float, .hm-scanline { animation: none; }
 }
+
+:focus-visible { outline: 3px solid #db2777; outline-offset: 3px; }
+::selection { background: #f9a8d4; color: #071844; }
+button:not(:disabled) { cursor: pointer; }

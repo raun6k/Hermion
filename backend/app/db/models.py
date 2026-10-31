@@ -122,6 +122,28 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class StateChange(Base):
+    __tablename__ = "state_changes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.session_id"), index=True)
+    from_state: Mapped[str] = mapped_column(String(24))
+    to_state: Mapped[str] = mapped_column(String(24))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ToolCallTrace(Base):
+    __tablename__ = "tool_calls"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.session_id"), index=True)
+    channel: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(64))
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Offer(Base):
     """Engine log; id is the evaluation_id."""
 

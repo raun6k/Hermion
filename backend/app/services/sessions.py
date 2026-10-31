@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import TERMINAL_STATES, Merchant, Session, SessionState
+from app.db.models import TERMINAL_STATES, Merchant, Session, SessionState, StateChange
 from app.schemas.common import AppError
 from app.schemas.events import SessionStateEvent, StateEvent
 from app.services.hub import Hubs
@@ -73,6 +73,7 @@ async def transition(db: AsyncSession, hubs: Hubs | None, session_id: uuid.UUID,
     session = await get_session(db, session_id)
     if not can_transition(session.state, to):
         raise AppError("WRONG_STATE", f"Cannot go from {session.state.value} to {to.value}", 409)
+    db.add(StateChange(session_id=session_id, from_state=session.state.value, to_state=to.value))
     session.state = to
     if to in TERMINAL_STATES:
         session.ended_at = datetime.now(UTC)

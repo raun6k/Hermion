@@ -12,6 +12,7 @@ from app.engine.bundle import suggest_bundle as engine_suggest_bundle
 from app.engine.concession import evaluate_offer
 from app.engine.types import (
     Evaluation,
+    LinePrice,
     MandateRule,
     NegotiationContext,
     OfferItem,
@@ -42,13 +43,27 @@ def mandate_rules(mandate_json: dict[str, Any]) -> tuple[MandateRule, ...]:
     )
 
 
-async def build_context(db: AsyncSession, session: Session) -> NegotiationContext:
+async def build_context(
+    db: AsyncSession, session: Session, items: list[OfferItem] | None = None
+) -> NegotiationContext:
     """Session facts for the engine, all derived from the DB (docs/engine.md)."""
     rounds: dict[str, int] = {}
-    for offer in await db.scalars(select(Offer).where(Offer.session_id == session.session_id)):
+    previous: tuple[LinePrice, ...] = ()
+    expected = {(i.product_id, i.qty) for i in items or []}
+    for offer in await db.scalars(
+        select(Offer).where(Offer.session_id == session.session_id).order_by(Offer.created_at, Offer.id)
+    ):
         if offer.round > 0 and not offer.signals.get("bundle"):  # bundle quotes are not negotiation rounds
             for item in offer.items:
                 rounds[item["product_id"]] = rounds.get(item["product_id"], 0) + 1
+        if (
+            expected
+            and offer.decision == "counter"
+            and {(i["product_id"], i["qty"]) for i in offer.items} == expected
+        ):
+            previous = tuple(
+                LinePrice(p["product_id"], p["qty"], Decimal(p["line_total"])) for p in offer.line_prices
+            )
 
     all_products = [p for p in await catalog.list_products(db)]
     clear: set[str] = set()
@@ -70,6 +85,7 @@ async def build_context(db: AsyncSession, session: Session) -> NegotiationContex
         preserve_stock=frozenset(preserve),
         mandate_rules=mandate_rules(mandate.rules) if mandate else (),
         bundle_allowed=bool(merchant and merchant.bundle_allowed),
+        last_counter=previous,
     )
 
 
@@ -176,7 +192,7 @@ async def evaluate(
 ) -> dict[str, Any]:
     session = await _negotiable_session(db, hubs, session_id)
     products = await catalog.product_terms(db, [i.product_id for i in items])
-    ctx = await build_context(db, session)
+    ctx = await build_context(db, session, items)
     ev = evaluate_offer(products, items, offered_amount, offer_scope, buy_now, ctx)
     offer = await _store(db, hubs, session, items, offered_amount, offer_scope.value, ev, buy_now=buy_now)
     if ev.round > 0:  # a real negotiation round: first one moves discovery on
