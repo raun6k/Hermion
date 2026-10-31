@@ -27,6 +27,39 @@ from app.services import catalog, sessions, trace, views
 from app.services.hub import Hubs
 
 
+async def generate_greeting(
+    db: AsyncSession, llm: LLMClient, sid: uuid.UUID, language: str, on_fallback=None
+) -> str:
+    """Generate an introduction in the selected language without fabricating customer text."""
+    session = await sessions.get_session(db, sid)
+    merchant = await catalog.get_merchant(db)
+    goals = list(await db.scalars(select(Goal).where(Goal.merchant_id == session.merchant_id)))
+    shop = ShopFacts(
+        merchant.shop_name,
+        merchant.shop_description,
+        merchant.negotiation_instructions,
+        tuple(goal.instructions for goal in goals),
+    )
+    messages = [
+        {"role": "system", "content": build_system_prompt(shop)},
+        {"role": "system", "content": build_state_block(StateView(state="intro", language=language))},
+    ]
+
+    async def no_tool(name, arguments):
+        return {"error": "TOOL_NOT_ALLOWED"}
+
+    return await run_tool_loop(
+        llm,
+        messages,
+        [],
+        no_tool,
+        lambda: set(),
+        fallback=languages.require(language).sample,
+        valid=lambda text: matches_language_script(text, language),
+        on_fallback=on_fallback,
+    )
+
+
 async def customer_turn(
     db: AsyncSession, hubs: Hubs, llm: LLMClient, sid: uuid.UUID, text: str, pinned: str | None = None
 ) -> str:

@@ -30,7 +30,12 @@ class LanguagePin(Schema):
     code: str | None
 
 
-CustomerInbound = Annotated[TextInput | Mute | LanguagePin, Field(discriminator="type")]
+class LanguageSelection(Schema):
+    type: Literal["select_language"] = "select_language"
+    code: str = Field(min_length=1)
+
+
+CustomerInbound = Annotated[TextInput | Mute | LanguagePin | LanguageSelection, Field(discriminator="type")]
 customer_inbound_adapter: TypeAdapter[CustomerInbound] = TypeAdapter(CustomerInbound)
 
 # ---- server -> customer -------------------------------------------------------------
@@ -40,6 +45,11 @@ class StateEvent(Schema):
     type: Literal["state"] = "state"
     state: SessionStateName
     message: str | None = None
+
+
+class LanguageSelectedEvent(Schema):
+    type: Literal["language_selected"] = "language_selected"
+    code: str
 
 
 class AgentStateEvent(Schema):
@@ -83,6 +93,7 @@ class ErrorEvent(Schema):
 
 CustomerOutbound = (
     StateEvent
+    | LanguageSelectedEvent
     | AgentStateEvent
     | TranscriptEvent
     | TtsEnd

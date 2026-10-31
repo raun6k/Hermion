@@ -94,3 +94,33 @@ async def test_previous_search_results_remain_available_for_later_offers() -> No
         assert state.endswith("language's own script (not romanized).")
 
     await with_db(exercise)
+
+
+async def test_greeting_uses_selected_language_and_no_customer_text() -> None:
+    from app.agent.customer import generate_greeting
+
+    async def exercise(db):
+        session = await sessions.create_session(db, QR, str(uuid.uuid4()))
+        llm = FakeLLMClient([LLMResponse(text="నమస్కారం, నేను హెర్మియన్. మీకు ఏమి కావాలి?")])
+        reply = await generate_greeting(db, llm, session.session_id, "te-IN")
+        assert "నమస్కారం" in reply
+        assert all(message["role"] == "system" for message in llm.calls[0])
+        assert "Telugu" in llm.calls[0][-1]["content"]
+
+    await with_db(exercise)
+
+
+async def test_greeting_fallback_is_observable_to_evaluation() -> None:
+    from app.agent.customer import generate_greeting
+
+    async def exercise(db):
+        session = await sessions.create_session(db, QR, str(uuid.uuid4()))
+        llm = FakeLLMClient([LLMResponse(text="Hello"), LLMResponse(text="Hello again")])
+        used_fallback = []
+        reply = await generate_greeting(
+            db, llm, session.session_id, "te-IN", on_fallback=lambda: used_fallback.append(True)
+        )
+        assert used_fallback == [True]
+        assert "నమస్కారం" in reply
+
+    await with_db(exercise)

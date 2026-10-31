@@ -4,10 +4,9 @@ Runs every scenario in seed/customer_scenarios.json through a `TurnRunner` again
 engine and DB, then scores the result from the DB (the offer log) and the replies. Hard bars fail the
 run; the rest is reported.
 
-    make eval                       # default runner on a language-aware fake LLM (offline)
+    make eval                       # configured LLM; real Luna for the Stage 2 gate
     python -m tests.eval.run_scenarios --json
 
-The Stage 2 tool loop plugs in by implementing `TurnRunner`; nothing here changes.
 """
 
 import argparse
@@ -26,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app import languages
 from app.agent.briefing import handle_briefing
-from app.agent.customer import customer_turn
+from app.agent.customer import customer_turn, generate_greeting
 from app.agent.guard import GuardFacts, allowed_amounts, check_reply, extract_amounts
 from app.agent.llm_client import FakeLLMClient, LLMClient, LLMResponse, build_llm_client
 from app.agent.loop import FALLBACK_REPLY, run_turn
@@ -81,15 +80,58 @@ class SkeletonRunner:
         return await run_turn(llm, text)
 
 
+class TimedLLMClient:
+    """Collect wall time spent awaiting model calls; reset once per turn."""
+
+    def __init__(self, client: LLMClient, clock=time.perf_counter) -> None:
+        self.client = client
+        self.clock = clock
+        self.call_latencies_ms: list[int] = []
+
+    async def complete(self, messages, tools=None) -> LLMResponse:
+        started = self.clock()
+        try:
+            return await self.client.complete(messages, tools)
+        finally:
+            self.call_latencies_ms.append(round((self.clock() - started) * 1000))
+
+
 class AgentRunner:
     """Run the same guarded agent and private briefing used by the application."""
 
     supports_briefing = True
 
     def __init__(self, llm: LLMClient) -> None:
-        self.llm = llm
+        self.llm = TimedLLMClient(llm)
+
+    @property
+    def last_llm_latency_ms(self) -> int | None:
+        return sum(self.llm.call_latencies_ms) if self.llm.call_latencies_ms else None
+
+    async def start(self, ctx: EvalContext) -> str:
+        self.llm.call_latencies_ms.clear()
+        self.greeting_used_fallback = False
+
+        def mark_fallback() -> None:
+            self.greeting_used_fallback = True
+
+        reply = await generate_greeting(
+            ctx.db, self.llm, ctx.session_id, ctx.scenario.language, on_fallback=mark_fallback
+        )
+        await trace.record_message(
+            ctx.db,
+            ctx.hubs.merchant,
+            ctx.session_id,
+            channel="customer",
+            speaker="hermion",
+            text=reply,
+            language=ctx.scenario.language,
+        )
+        await sessions.transition(ctx.db, ctx.hubs, ctx.session_id, SessionState.discovery)
+        return reply
 
     async def turn(self, ctx: EvalContext, text: str) -> str:
+        self.llm.call_latencies_ms.clear()
         if ctx.scenario.channel == "briefing":
             return (await handle_briefing(ctx.db, ctx.hubs, self.llm, ctx.session_id, text)).reply
         await trace.record_message(
@@ -126,6 +168,7 @@ class ScenarioResult:
     final_state: str = ""
     replies: list[str] = field(default_factory=list)
     latencies_ms: list[int] = field(default_factory=list)
+    llm_latencies_ms: list[int] = field(default_factory=list)
     below_minimum: int = 0
     guard_violations: int = 0
     private_leaks: int = 0
@@ -238,6 +281,16 @@ async def run_scenario(db: AsyncSession, sc: Scenario, runner: TurnRunner) -> Sc
         await _setup_pending_basket(db, hubs, sid)
 
     ctx = EvalContext(db, hubs, sid, sc)
+    start = getattr(runner, "start", None)
+    if sc.channel == "customer" and start is not None:
+        started = time.perf_counter()
+        result.replies.append(await start(ctx))
+        if getattr(runner, "greeting_used_fallback", False):
+            result.expectation_failures.append("greeting used a fallback instead of the model response")
+        result.latencies_ms.append(int((time.perf_counter() - started) * 1000))
+        model_latency = getattr(runner, "last_llm_latency_ms", None)
+        if model_latency is not None:
+            result.llm_latencies_ms.append(model_latency)
     for n, text in enumerate(sc.messages, start=1):
         if sc.exit_after is not None and n > sc.exit_after:
             break
@@ -250,6 +303,9 @@ async def run_scenario(db: AsyncSession, sc: Scenario, runner: TurnRunner) -> Sc
         started = time.perf_counter()
         result.replies.append(await runner.turn(ctx, text))
         result.latencies_ms.append(int((time.perf_counter() - started) * 1000))
+        model_latency = getattr(runner, "last_llm_latency_ms", None)
+        if model_latency is not None:
+            result.llm_latencies_ms.append(model_latency)
         if injection_turn:
             after = await db.scalar(select(func.count(Offer.id)).where(Offer.session_id == sid))
             result.injection_price_changes += max(0, (after or 0) - (before or 0))
@@ -266,8 +322,10 @@ def summarize(results: list[ScenarioResult]) -> dict[str, Any]:
     ran = [r for r in results if r.status == "ok"]
     latencies = sorted(ms for r in ran for ms in r.latencies_ms)
 
-    def pct(p: float) -> int | None:
-        return latencies[min(len(latencies) - 1, int(p * len(latencies)))] if latencies else None
+    llm_latencies = sorted(ms for r in ran for ms in r.llm_latencies_ms)
+
+    def pct(values: list[int], p: float) -> int | None:
+        return values[min(len(values) - 1, int(p * len(values)))] if values else None
 
     reachable = [r for r in ran if r.reachable]
     settles = [r.settle_vs_target for r in ran if r.settle_vs_target is not None]
@@ -286,8 +344,11 @@ def summarize(results: list[ScenarioResult]) -> dict[str, Any]:
         "report": {
             "deal_rate_when_reachable": f"{sum(r.deal for r in reachable)}/{len(reachable)}",
             "avg_settle_vs_target": round(statistics.mean(settles), 3) if settles else None,
-            "turn_latency_ms_p50": pct(0.5),
-            "turn_latency_ms_p95": pct(0.95),
+            "turn_latency_ms_p50": pct(latencies, 0.5),
+            "turn_latency_ms_p95": pct(latencies, 0.95),
+            "llm_latency_ms_p50": pct(llm_latencies, 0.5),
+            "llm_latency_ms_p95": pct(llm_latencies, 0.95),
+            "llm_turns_measured": len(llm_latencies),
         },
         "failures": {r.scenario_id: r.expectation_failures for r in ran if r.expectation_failures},
     }

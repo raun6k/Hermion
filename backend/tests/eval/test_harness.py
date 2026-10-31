@@ -192,3 +192,22 @@ def test_reachable_uses_actual_threshold_not_catalog_minimum(reseed) -> None:
     below, at_threshold = run_db(go)
     assert not below.reachable
     assert at_threshold.reachable
+
+
+async def test_model_latency_sums_calls_separately_from_turn_time() -> None:
+    from app.agent.llm_client import FakeLLMClient, LLMResponse
+    from tests.eval.run_scenarios import ScenarioResult, TimedLLMClient
+
+    times = iter([1.0, 1.125, 2.0, 2.3])
+    client = TimedLLMClient(
+        FakeLLMClient([LLMResponse("one"), LLMResponse("two")]), clock=lambda: next(times)
+    )
+    await client.complete([{"role": "user", "content": "hello"}])
+    await client.complete([{"role": "user", "content": "hello"}])
+    assert client.call_latencies_ms == [125, 300]
+    report = summarize(
+        [ScenarioResult("timed", latencies_ms=[600], llm_latencies_ms=[sum(client.call_latencies_ms)])]
+    )["report"]
+    assert report["turn_latency_ms_p50"] == 600
+    assert report["llm_latency_ms_p50"] == 425
+    assert report["llm_turns_measured"] == 1

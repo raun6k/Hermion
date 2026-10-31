@@ -162,7 +162,7 @@ export class MockBackend {
     const s: MockSession = {
       id,
       state: "intro",
-      language: "te-IN",
+      language: null,
       started_at: this.now(),
       ended_at: null,
       messages: [],
@@ -351,18 +351,29 @@ export class MockBackend {
     }
     onEvent({ type: "agent_state", state: "idle" });
     s.transcripts.slice(-20).forEach((t) => onEvent({ type: "transcript", speaker: t.speaker, text: t.text, final: true }));
-    if (s.state === "intro") {
-      this.later(300, () => {
-        this.toCustomer(id, { type: "agent_state", state: "thinking" });
-        this.later(500, () => {
-          this.setState(s, "discovery");
-          void this.say(s, T.greet);
-        });
-      });
-    }
     return {
       send: (e) => {
-        if (e.type === "text_input") this.customerText(s, e.text);
+        if (e.type === "select_language") {
+          if (!this.merchant.languages.includes(e.code)) {
+            this.toCustomer(id, { type: "error", code: "UNSUPPORTED_LANGUAGE", message: "Language is not available in this shop" });
+          } else if (s.state !== "intro") {
+            if (s.language === e.code) this.toCustomer(id, { type: "language_selected", code: e.code });
+            else this.toCustomer(id, { type: "error", code: "WRONG_STATE", message: "Language selection is already complete" });
+          } else {
+            s.language = e.code;
+            this.toCustomer(id, { type: "language_selected", code: e.code });
+            this.toCustomer(id, { type: "agent_state", state: "thinking" });
+            this.later(500, () => {
+              if (s.state !== "intro") return;
+              this.setState(s, "discovery");
+              const greeting: Say = s.language === "te-IN" ? T.greet : ["👋 Hermion", "नमस्ते! मैं हर्मियन हूँ।"];
+              void this.say(s, greeting);
+            });
+          }
+        } else if (e.type === "text_input") {
+          if (s.state === "intro") this.toCustomer(id, { type: "error", code: "LANGUAGE_REQUIRED", message: "Choose a language before starting" });
+          else this.customerText(s, e.text);
+        }
       },
       close: off,
     };

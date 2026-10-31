@@ -13,8 +13,13 @@ test("real backend: customer negotiation, private mandate, revised deal and merc
   await page.getByTestId("scan-qr").click();
   await page.getByTestId("scanner").focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("more-toggle")).toBeVisible();
-  await say(page, "Hello");
+  await expect(page.getByTestId("language-choice")).toBeVisible();
+  for (const code of ["hi-IN", "te-IN", "kn-IN", "en-IN"]) {
+    await expect(page.getByTestId(`choose-language-${code}`)).toBeVisible();
+  }
+  await expect(page.getByTestId("customer-transcript")).toBeEmpty();
+  await page.getByTestId("choose-language-en-IN").click();
+  await expect(page.getByTestId("customer-transcript")).toContainText("Hermion");
   await expect(page.getByTestId("session-status")).toContainText("discovery");
   await say(page, "blue shirt size M");
   await expect(page.getByTestId("customer-transcript")).toContainText("I found the blue shirt");

@@ -14,6 +14,8 @@ async function scan(page: Page) {
   await page.getByTestId("scan-qr").click();
   await page.getByTestId("scanner").focus();
   await page.keyboard.press("Enter");
+  await expect(page.getByTestId("language-choice")).toBeVisible();
+  await page.getByTestId("choose-language-te-IN").click();
 }
 
 test("full demo: negotiate, send, brief Hermion, pair deal, merchant accepts", async ({ page }) => {

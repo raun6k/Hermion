@@ -16,6 +16,7 @@ export function MoreSheet({
   conversation,
   basketCount,
   canType,
+  pinnedLanguage,
   onViewBasket,
   onSend,
   onLanguage,
@@ -25,6 +26,7 @@ export function MoreSheet({
   conversation: ConversationLine[];
   basketCount: number;
   canType: boolean;
+  pinnedLanguage: string | null;
   onViewBasket: () => void;
   onSend: (text: string) => void;
   onLanguage: (code: string | null) => void;
@@ -32,7 +34,6 @@ export function MoreSheet({
 }) {
   const [draft, setDraft] = useState("");
   const [info, setInfo] = useState<SessionPublic | null>(null);
-  const [pinned, setPinned] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -56,7 +57,6 @@ export function MoreSheet({
     setDraft("");
   };
   const choose = (code: string | null) => {
-    setPinned(code);
     onLanguage(code);
   };
 
@@ -91,8 +91,8 @@ export function MoreSheet({
             <button
               key={code ?? "auto"}
               onClick={() => choose(code)}
-              aria-pressed={pinned === code}
-              className={`rounded-full px-3 py-1 text-xs ${pinned === code ? "bg-blue-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-300"}`}
+              aria-pressed={pinnedLanguage === code}
+              className={`rounded-full px-3 py-1 text-xs ${pinnedLanguage === code ? "bg-blue-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-300"}`}
               data-testid={`language-${code ?? "auto"}`}
             >
               {code === null ? "Auto" : name(code)}

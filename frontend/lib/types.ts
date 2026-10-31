@@ -151,6 +151,7 @@ export interface Health { status: "ok" | "error"; checks: Record<string, HealthC
 
 // ---- customer WS: client -> server ----
 export type CustomerInbound =
+  | { type: "select_language"; code: string }
   | { type: "text_input"; text: string }
   | { type: "mute"; muted: boolean }
   | { type: "language"; code: string | null };
@@ -158,6 +159,7 @@ export type CustomerInbound =
 // ---- customer WS: server -> client ----
 export type CustomerOutbound =
   | { type: "state"; state: SessionState; message: string | null }
+  | { type: "language_selected"; code: string }
   | { type: "agent_state"; state: AgentState }
   | { type: "transcript"; speaker: "customer" | "hermion"; text: string; final: boolean }
   | { type: "tts_end" }

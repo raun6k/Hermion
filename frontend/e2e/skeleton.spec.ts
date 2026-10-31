@@ -6,7 +6,9 @@ async function scanWithKeyboard(page: Page) {
   await page.getByTestId("scan-qr").click();
   await page.getByTestId("scanner").focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("session-status")).toContainText("intro", { timeout: 10_000 });
+  await expect(page.getByTestId("language-choice")).toBeVisible();
+  await page.getByTestId("choose-language-en-IN").click();
+  await expect(page.getByTestId("session-status")).toContainText("discovery", { timeout: 10_000 });
 }
 
 test("scan, chat with Hermion, see the trace, end the call", async ({ page }) => {
@@ -16,7 +18,7 @@ test("scan, chat with Hermion, see the trace, end the call", async ({ page }) =>
   await expect(page.getByTestId("health")).toContainText("db: ok");
 
   await scanWithKeyboard(page);
-  await expect(page.getByTestId("session-row").first()).toContainText("intro");
+  await expect(page.getByTestId("session-row").first()).toContainText("discovery");
   await expect(page.getByTestId("scanner")).toHaveCount(0); // the scanner stays away during a session
   await expect(page.getByTestId("scan-qr")).toHaveCount(0);
 
@@ -58,7 +60,9 @@ test("dragging the scanner onto the QR starts a session; dropping elsewhere does
   await page.mouse.move(qr.x + qr.width / 2, qr.y + qr.height / 2, { steps: 12 });
   await expect(page.getByTestId("lock-on")).toBeVisible();
   await page.mouse.up();
-  await expect(page.getByTestId("session-status")).toContainText("intro", { timeout: 10_000 });
+  await expect(page.getByTestId("language-choice")).toBeVisible();
+  await page.getByTestId("choose-language-en-IN").click();
+  await expect(page.getByTestId("session-status")).toContainText("discovery", { timeout: 10_000 });
   await expect(page.getByTestId("scanner")).toHaveCount(0);
   await page.getByTestId("end-call").click();
 });
@@ -74,10 +78,18 @@ test("cancel hides the scanner; the language list comes from the shop", async ({
   await page.getByTestId("scan-qr").click();
   await page.getByTestId("scanner").focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("session-status")).toContainText("intro", { timeout: 10_000 });
+  await expect(page.getByTestId("language-choice")).toBeVisible();
+  await page.getByTestId("choose-language-en-IN").click();
+  await expect(page.getByTestId("session-status")).toContainText("discovery", { timeout: 10_000 });
   await page.getByTestId("more-toggle").click();
   await page.getByTestId("language-section").locator("summary").click();
   await expect(page.getByTestId("language-auto")).toBeVisible();
+  await expect(page.getByTestId("language-en-IN")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("language-te-IN")).toContainText("Telugu");
+  await page.getByTestId("language-auto").click();
+  await page.getByTestId("more-toggle").click();
+  await page.getByTestId("more-toggle").click();
+  await page.getByTestId("language-section").locator("summary").click();
+  await expect(page.getByTestId("language-auto")).toHaveAttribute("aria-pressed", "true");
   await page.getByTestId("end-call").click();
 });

@@ -1,7 +1,7 @@
 """Customer WebSocket /ws/sessions/{id} (docs/api.md#websocket-customer-wssessionsid).
 
 Integration seam (lane B owns it). Connect replays state, basket, agent_state and the last 20 transcripts.
-Turn handling is still the skeleton: keypad text -> one LLM call -> transcript back; both messages traced.
+The customer selects a language, receives a greeting, and then sends text turns.
 """
 
 import asyncio
@@ -11,8 +11,8 @@ from uuid import UUID
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from app.agent.customer import customer_turn
-from app.db.models import TERMINAL_STATES, Session
+from app.agent.customer import customer_turn, generate_greeting
+from app.db.models import TERMINAL_STATES, Session, SessionState
 from app.db.session import sessionmaker
 from app.log import session_id as session_id_ctx
 from app.schemas.common import AgentState
@@ -21,12 +21,14 @@ from app.schemas.events import (
     BasketEvent,
     ErrorEvent,
     LanguagePin,
+    LanguageSelectedEvent,
+    LanguageSelection,
     StateEvent,
     TextInput,
     TranscriptEvent,
     customer_inbound_adapter,
 )
-from app.services import catalog, trace, views
+from app.services import catalog, sessions, trace, views
 
 REPLAY_TRANSCRIPTS = 20
 
@@ -44,6 +46,8 @@ async def customer_ws(ws: WebSocket, session_id: UUID) -> None:
             await ws.close(code=4404, reason="unknown or ended session")
             return
         await ws.accept()
+        if session.language:
+            state.language_pins.setdefault(session_id, session.language)
         state.customer_hub.set(session_id, ws)
 
         async def send(event) -> None:
@@ -57,7 +61,34 @@ async def customer_ws(ws: WebSocket, session_id: UUID) -> None:
         await send(AgentStateEvent(state=AgentState(state.customer_hub.last_agent_state(session_id))))
         for msg in await views.recent_transcripts(db, session_id, REPLAY_TRANSCRIPTS):
             await send(TranscriptEvent(speaker=msg.speaker, text=msg.text))
+
+        async def greet_if_needed() -> None:
+            await db.refresh(session)
+            if session.state != SessionState.intro or not session.language:
+                return
+            recent = await views.recent_transcripts(db, session_id, REPLAY_TRANSCRIPTS)
+            if any(message.speaker == "hermion" for message in recent):
+                await sessions.transition(db, state.hubs, session_id, SessionState.discovery)
+                return
+            await send(AgentStateEvent(state=AgentState.thinking))
+            reply = await generate_greeting(db, state.llm, session_id, session.language)
+            await trace.record_message(
+                db,
+                state.merchant_hub,
+                session_id,
+                channel="customer",
+                speaker="hermion",
+                text=reply,
+                language=session.language,
+            )
+            await sessions.transition(db, state.hubs, session_id, SessionState.discovery)
+            await send(TranscriptEvent(speaker="hermion", text=reply))
+            await send(AgentStateEvent(state=AgentState.idle))
+
         try:
+            if session.state == SessionState.intro and session.language:
+                async with state.turn_locks.setdefault(session_id, asyncio.Lock()):
+                    await greet_if_needed()
             while True:
                 raw = await ws.receive_json()
                 try:
@@ -65,12 +96,45 @@ async def customer_ws(ws: WebSocket, session_id: UUID) -> None:
                 except ValidationError:
                     await send(ErrorEvent(code="INVALID_EVENT", message="Unrecognised event"))
                     continue
-                if isinstance(event, TextInput):
+                if isinstance(event, LanguageSelection):
+                    async with state.turn_locks.setdefault(session_id, asyncio.Lock()):
+                        await db.refresh(session)
+                        shop = await catalog.get_merchant(db)
+                        if event.code not in shop.languages:
+                            await send(
+                                ErrorEvent(
+                                    code="UNSUPPORTED_LANGUAGE",
+                                    message="Language is not available in this shop",
+                                )
+                            )
+                        elif session.state != SessionState.intro:
+                            if session.language == event.code:
+                                await send(LanguageSelectedEvent(code=event.code))
+                            else:
+                                await send(
+                                    ErrorEvent(
+                                        code="WRONG_STATE", message="Language selection is already complete"
+                                    )
+                                )
+                        else:
+                            session.language = event.code
+                            state.language_pins[session_id] = event.code
+                            await db.commit()
+                            await send(LanguageSelectedEvent(code=event.code))
+                            await greet_if_needed()
+                elif isinstance(event, TextInput):
                     lock = state.turn_locks.setdefault(session_id, asyncio.Lock())
                     async with lock:
                         await db.refresh(session)
                         if session.state in TERMINAL_STATES:
                             await send(ErrorEvent(code="WRONG_STATE", message="This session has ended"))
+                            continue
+                        if session.state == SessionState.intro:
+                            await send(
+                                ErrorEvent(
+                                    code="LANGUAGE_REQUIRED", message="Choose a language before starting"
+                                )
+                            )
                             continue
                         await send(TranscriptEvent(speaker="customer", text=event.text))
                         await trace.record_message(

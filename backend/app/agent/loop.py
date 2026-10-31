@@ -27,7 +27,7 @@ async def run_turn(llm: LLMClient, customer_text: str) -> str:
 
 
 async def run_tool_loop(
-    llm, messages, tools, dispatch, allowed, fallback=FALLBACK_REPLY, valid=lambda _: True
+    llm, messages, tools, dispatch, allowed, fallback=FALLBACK_REPLY, valid=lambda _: True, on_fallback=None
 ):
     """Run at most three sequential tools and guard the final customer reply.
 
@@ -38,16 +38,22 @@ async def run_tool_loop(
     from app.agent.guard import check_reply
 
     messages = list(messages)
+
+    def use_fallback():
+        if on_fallback:
+            on_fallback()
+        return fallback
+
     latest_price = None
     for step in range(4):
         try:
             response = await llm.complete(messages, tools=tools() if callable(tools) else tools)
         except LLMError:
             log.exception("llm call failed")
-            return fallback
+            return use_fallback()
         if response.tool_calls:
             if step == 3:
-                return fallback
+                return use_fallback()
             call = response.tool_calls[0]
             messages.append(
                 {
@@ -74,7 +80,7 @@ async def run_tool_loop(
             continue
         reply = (response.text or "").strip()
         if not reply:
-            return fallback
+            return use_fallback()
         if not check_reply(reply, allowed()) and valid(reply):
             return reply
         messages.append({"role": "assistant", "content": reply})
@@ -88,7 +94,7 @@ async def run_tool_loop(
             retry = await llm.complete(messages, tools=tools() if callable(tools) else tools)
         except LLMError:
             log.exception("llm regeneration failed")
-            return fallback
+            return use_fallback()
         reply = (retry.text or "").strip()
         if reply and not retry.tool_calls and not check_reply(reply, allowed()) and valid(reply):
             return reply
@@ -96,5 +102,5 @@ async def run_tool_loop(
             template = f"The price is ₹{latest_price}."
             if not check_reply(template, allowed()) and valid(template):
                 return template
-        return fallback
-    return fallback
+        return use_fallback()
+    return use_fallback()

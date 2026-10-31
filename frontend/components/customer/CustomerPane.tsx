@@ -15,6 +15,7 @@ import { BasketChip, BasketSheet } from "./BasketSheet";
 import { CallControls } from "./CallControls";
 import { Caption, type CaptionLine } from "./Caption";
 import { Mascot } from "./Mascot";
+import { LanguageChoice } from "./LanguageChoice";
 import { MoreSheet } from "./MoreSheet";
 import { PhoneFrame } from "./PhoneFrame";
 import { Scanner } from "./Scanner";
@@ -29,6 +30,12 @@ const WAITING: SessionState[] = ["pending_merchant", "briefing"];
 export function CustomerPane() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [languages, setLanguages] = useState<string[] | null>(null);
+  const [languageReady, setLanguageReady] = useState(false);
+  const [languagePin, setLanguagePin] = useState<string | null>(null);
+  const [languagePending, setLanguagePending] = useState(false);
+  const [languageError, setLanguageError] = useState<string | null>(null);
+  const [languageLoadAttempt, setLanguageLoadAttempt] = useState(0);
   const [state, setState] = useState<SessionState | null>(null);
   const [stateMessage, setStateMessage] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentState>("idle");
@@ -46,6 +53,19 @@ export function CustomerPane() {
 
   useEffect(() => {
     if (!sessionId) return;
+    let active = true;
+    api.session(sessionId).then((info) => {
+      if (!active) return;
+      setLanguages(info.languages);
+      if (info.state !== "intro" || info.language) setLanguageReady(true);
+      if (info.language) setLanguagePin(info.language);
+      setLanguageError(null);
+    }).catch(() => { if (active) setLanguageError("Could not load languages. Please try again."); });
+    return () => { active = false; };
+  }, [sessionId, languageLoadAttempt]);
+
+  useEffect(() => {
+    if (!sessionId) return;
     player.current ??= new TtsPlayer();
     const c = connectCustomer(
       sessionId,
@@ -57,12 +77,21 @@ export function CustomerPane() {
             setSheet(false);
             setMore(false);
           }
+        } else if (e.type === "language_selected") {
+          setLanguagePin(e.code);
+          setLanguageReady(true);
+          setLanguagePending(false);
+          setLanguageError(null);
         } else if (e.type === "agent_state") setAgent(e.state);
         else if (e.type === "transcript") setTranscript((t) => [...t, { speaker: e.speaker, text: e.text }]);
         else if (e.type === "caption") setCaption({ speaker: e.speaker, product_name: e.product_name, amount: e.amount });
         else if (e.type === "basket") setBasket({ lines: e.lines, total: e.total });
         else if (e.type === "tts_stop") player.current?.stop();
-        else if (e.type === "error") setError(e.message);
+        else if (e.type === "error") {
+          setLanguagePending(false);
+          if (e.code === "UNSUPPORTED_LANGUAGE" || e.code === "LANGUAGE_REQUIRED") setLanguageError(e.message);
+          else setError(e.message);
+        }
       },
       { onBinary: (chunk) => player.current?.enqueue(chunk) },
     );
@@ -76,6 +105,11 @@ export function CustomerPane() {
   const reset = useCallback(() => {
     setSessionId(null);
     setScanning(false);
+    setLanguages(null);
+    setLanguageReady(false);
+    setLanguagePin(null);
+    setLanguagePending(false);
+    setLanguageError(null);
     setState(null);
     setStateMessage(null);
     setAgent("idle");
@@ -123,7 +157,8 @@ export function CustomerPane() {
   const inCall = sessionId !== null && !terminal;
   const waiting = state !== null && WAITING.includes(state);
   const inPerson = state === "in_person";
-  const canType = inCall && !waiting && !inPerson;
+  const choosingLanguage = inCall && state === "intro" && !languageReady;
+  const canType = inCall && state !== "intro" && !waiting && !inPerson;
   const lastLine = transcript.length ? transcript[transcript.length - 1] : null;
   const mascot: AgentState = state === "accepted" ? "happy" : waiting ? "thinking" : agent;
   const card = "mx-6 rounded-2xl bg-white px-4 py-3 text-center text-sm font-medium text-blue-950 shadow";
@@ -156,6 +191,19 @@ export function CustomerPane() {
             )}
             {error && <p className="max-w-60 rounded-lg bg-white/10 px-3 py-2 text-xs text-pink-200" role="alert" data-testid="customer-error">{error}</p>}
           </div>
+        ) : choosingLanguage ? (
+          <LanguageChoice
+            languages={languages}
+            pending={languagePending}
+            error={languageError}
+            onChoose={(code) => {
+              setLanguagePending(true);
+              setLanguageError(null);
+              conn.current?.send({ type: "select_language", code });
+            }}
+            onCancel={endCall}
+            onRetry={() => setLanguageLoadAttempt((n) => n + 1)}
+          />
         ) : (
           <>
             {basket.lines.length > 0 && inCall && (
@@ -216,12 +264,16 @@ export function CustomerPane() {
                 conversation={transcript}
                 basketCount={basket.lines.length}
                 canType={canType}
+                pinnedLanguage={languagePin}
                 onViewBasket={() => {
                   setMore(false);
                   setSheet(true);
                 }}
                 onSend={(text) => conn.current?.send({ type: "text_input", text })}
-                onLanguage={(code) => conn.current?.send({ type: "language", code })}
+                onLanguage={(code) => {
+                  setLanguagePin(code);
+                  conn.current?.send({ type: "language", code });
+                }}
                 onClose={() => setMore(false)}
               />
             )}
